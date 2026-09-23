@@ -28,14 +28,7 @@ module.exports = function (io) {
     `);
     const scheduleWithOpponents = schedule.map(s => ({ ...s, opponents: opponentStmt.all(teamId, s.stage_id) }));
 
-    const elements = db.prepare(`
-      SELECT id, type, label, x_percent, y_percent, image_url, link_url, extra_json
-      FROM map_elements
-      WHERE visible = 1 AND (team_id IS NULL OR team_id = ?)
-      ORDER BY id ASC
-    `).all(teamId);
-
-    res.json({ background_image: resolveMapBackground(), schedule: scheduleWithOpponents, elements });
+    res.json({ background_image: resolveMapBackground(), schedule: scheduleWithOpponents });
   });
 
   // ---------------- SCORE ----------------

@@ -129,17 +129,7 @@ async function loadMap() {
   const data = await api('GET', '/api/team/map');
   document.getElementById('mapBg').src = data.background_image;
   const wrap = document.getElementById('mapWrap');
-  wrap.querySelectorAll('.map-pin, .map-element').forEach(el => el.remove());
-
-  data.elements.forEach(elm => {
-    const div = document.createElement('div');
-    div.className = 'map-element';
-    div.style.left = elm.x_percent + '%';
-    div.style.top = elm.y_percent + '%';
-    div.innerHTML = `<div class="el-badge">${ICONS[elm.type] || '📍'} ${escapeHtml(elm.label || '')}</div>`;
-    if (elm.link_url) { div.style.cursor = 'pointer'; div.onclick = () => window.open(elm.link_url, '_blank'); }
-    wrap.appendChild(div);
-  });
+  wrap.querySelectorAll('.map-pin').forEach(el => el.remove());
 
   const body = document.getElementById('scheduleBody');
   const sorted = [...data.schedule].sort((a, b) => (a.round_no ?? 999) - (b.round_no ?? 999));

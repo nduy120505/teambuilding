@@ -295,45 +295,9 @@ module.exports = function (io) {
     res.json({ ok: true });
   });
 
-  // Cac element tu do de chen them noi dung sau nay (marker/hinh anh/ghi chu tuy y tren map)
-  router.get('/map-elements', (req, res) => {
-    res.json({ elements: db.prepare('SELECT * FROM map_elements ORDER BY id ASC').all() });
-  });
-
-  router.post('/map-elements', (req, res) => {
-    const { team_id, type, label, x_percent, y_percent, image_url, link_url, extra_json } = req.body || {};
-    const info = db.prepare(`INSERT INTO map_elements (team_id, type, label, x_percent, y_percent, image_url, link_url, extra_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(team_id || null, type || 'marker', label || '', x_percent ?? 50, y_percent ?? 50,
-        image_url || '', link_url || '', extra_json || null);
-    io.emit('map:update');
-    res.json({ ok: true, id: info.lastInsertRowid });
-  });
-
-  router.put('/map-elements/:id', (req, res) => {
-    const id = Number(req.params.id);
-    const e = db.prepare('SELECT * FROM map_elements WHERE id = ?').get(id);
-    if (!e) return res.status(404).json({ error: 'Không tìm thấy phần tử' });
-    const b = req.body || {};
-    db.prepare(`UPDATE map_elements SET team_id=?, type=?, label=?, x_percent=?, y_percent=?, image_url=?, link_url=?, extra_json=?, visible=? WHERE id=?`)
-      .run(
-        b.team_id !== undefined ? b.team_id : e.team_id,
-        b.type ?? e.type, b.label ?? e.label,
-        b.x_percent ?? e.x_percent, b.y_percent ?? e.y_percent,
-        b.image_url ?? e.image_url, b.link_url ?? e.link_url,
-        b.extra_json ?? e.extra_json,
-        b.visible !== undefined ? (b.visible ? 1 : 0) : e.visible,
-        id
-      );
-    io.emit('map:update');
-    res.json({ ok: true });
-  });
-
-  router.delete('/map-elements/:id', (req, res) => {
-    db.prepare('DELETE FROM map_elements WHERE id = ?').run(Number(req.params.id));
-    io.emit('map:update');
-    res.json({ ok: true });
-  });
+  // Da bo tinh nang "Phan tu tu do tren ban do" theo yeu cau - khong con route map-elements nua.
+  // Bang map_elements van con trong schema (khong xoa de tranh migration pha huy tren DB dang chay)
+  // nhung khong con duoc doc/ghi tu dau nua.
 
   // Ghi chu: anh nen ban do khong con quan ly qua UI/API nua. De doi anh, chi can thay
   // file public/img/map-background.<duoi anh> truc tiep tren o dia (xem README). Server tu

@@ -97,18 +97,6 @@
       </table>
       <div class="empty-hint" id="scheduleEmpty" style="display:none;">Trống</div>
     </div>
-
-    <div class="flex-between">
-      <div class="section-title" style="margin:0;">Phần tử tự do trên bản đồ (chỗ trống để chèn thêm sau)</div>
-      <button class="btn sm" onclick="openElementModal()">+ Thêm phần tử</button>
-    </div>
-    <p class="small-note">Dùng mục này để cắm thêm icon/ghi chú/hình ảnh tuỳ ý lên bản đồ — cho cả các đội hoặc riêng từng đội — mà không cần sửa code.</p>
-    <div class="card">
-      <table>
-        <thead><tr><th>Nhãn</th><th>Loại</th><th>Đội</th><th>Vị trí</th><th>Thao tác</th></tr></thead>
-        <tbody id="elementsBody"></tbody>
-      </table>
-    </div>
   </div>
 
   <!-- ===================== GIFTS ===================== -->
@@ -237,7 +225,6 @@ async function loadTeams() {
     </tr>
   `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có đội nào.</td></tr>';
 
-  populateElementTeamOptions();
   populateScheduleTeamSelect();
   renderScoringForm();
 }
@@ -478,21 +465,6 @@ async function loadMapSettings() {
     </tr>
   `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có trò nào.</td></tr>';
   populateScheduleTeamSelect();
-
-  const elements = await api('GET', '/api/admin/map-elements');
-  document.getElementById('elementsBody').innerHTML = elements.elements.map(e => {
-    const team = TEAMS.find(t => t.id === e.team_id);
-    return `<tr>
-      <td>${ICONS[e.type]||'📍'} ${escapeHtml(e.label||'-')}</td>
-      <td>${escapeHtml(e.type)}</td>
-      <td>${team ? escapeHtml(team.name) : 'Tất cả đội'}</td>
-      <td>${e.x_percent}%, ${e.y_percent}%</td>
-      <td class="row-actions">
-        <button class="btn secondary sm" onclick="openElementModal(${e.id})">Sửa</button>
-        <button class="btn danger sm" onclick="deleteElement(${e.id})">Xoá</button>
-      </td>
-    </tr>`;
-  }).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có phần tử nào — dùng nút "+ Thêm phần tử" để chèn thêm sau.</td></tr>';
 }
 
 function openStageModal(id) {
@@ -664,60 +636,6 @@ async function deleteScheduleEntry(stageId) {
   if (!confirm('Xoá mục này khỏi lộ trình của đội?')) return;
   await api('DELETE', `/api/admin/teams/${teamId}/schedule/${stageId}`);
   toast('Đã xoá'); loadTeamSchedule();
-}
-
-function populateElementTeamOptions(selectedId) {
-  const sel = document.getElementById('elTeam');
-  if (!sel) return;
-  sel.innerHTML = `<option value="">Tất cả đội</option>` + TEAMS.map(t => `<option value="${t.id}" ${selectedId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
-}
-
-function openElementModal(id) {
-  showModal(`
-    <h3 style="margin-top:0;">${id ? 'Sửa phần tử' : 'Thêm phần tử trên bản đồ'}</h3>
-    <label>Nhãn hiển thị</label><input id="elLabel" placeholder="VD: Trạm nước, Bảng thông báo...">
-    <label>Loại</label>
-    <select id="elType">
-      <option value="marker">📍 Marker</option>
-      <option value="note">📝 Ghi chú</option>
-      <option value="image">🖼️ Hình ảnh</option>
-      <option value="custom">✨ Tuỳ chỉnh</option>
-    </select>
-    <label>Hiển thị cho đội</label>
-    <select id="elTeam"></select>
-    <div class="grid cols-2">
-      <div><label>Vị trí X (%)</label><input id="elX" type="number" value="50"></div>
-      <div><label>Vị trí Y (%)</label><input id="elY" type="number" value="50"></div>
-    </div>
-    <label>Link (tuỳ chọn, mở khi bấm vào)</label><input id="elLink" placeholder="https://...">
-    <div class="row-actions">
-      <button class="btn" onclick="saveElement(${id||'null'})">Lưu</button>
-      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
-    </div>
-  `);
-  populateElementTeamOptions();
-}
-
-async function saveElement(id) {
-  const body = {
-    label: document.getElementById('elLabel').value.trim(),
-    type: document.getElementById('elType').value,
-    team_id: document.getElementById('elTeam').value ? Number(document.getElementById('elTeam').value) : null,
-    x_percent: Number(document.getElementById('elX').value),
-    y_percent: Number(document.getElementById('elY').value),
-    link_url: document.getElementById('elLink').value.trim(),
-  };
-  try {
-    if (id) await api('PUT', `/api/admin/map-elements/${id}`, body);
-    else await api('POST', '/api/admin/map-elements', body);
-    closeModal(); toast('Đã lưu phần tử'); loadMapSettings();
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-async function deleteElement(id) {
-  if (!confirm('Xoá phần tử này?')) return;
-  await api('DELETE', `/api/admin/map-elements/${id}`);
-  toast('Đã xoá'); loadMapSettings();
 }
 
 /* ===================== GIFTS ===================== */
