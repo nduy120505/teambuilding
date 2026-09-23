@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Đội chơi · Teambuilding FIT</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand" style="font-size:1.05rem;"><span class="dot"></span> Teambuilding FIT</div>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <div id="finalBanner" style="display:none;">
+      <a href="/final.html" class="btn danger sm">🔔 Ai thông minh hơn sinh viên năm nhất — Vào ngay</a>
+    </div>
+    <div class="points-badge">🏅 <span id="pointsVal">0</span> điểm</div>
+    <div class="team-pill"><span class="swatch" id="teamSwatch"></span><span id="teamNameLbl">...</span></div>
+    <button class="btn secondary sm" id="logoutBtn">Đăng xuất</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="tabs" style="max-width:480px;">
+    <button class="tab-btn active" data-tab="map">🗺️ Bản đồ</button>
+    <button class="tab-btn" data-tab="score">📊 Điểm số</button>
+    <button class="tab-btn" data-tab="gift">🎁 Đổi quà</button>
+  </div>
+
+  <div id="tab-map" class="tab-panel">
+    <div class="section-title">Bản đồ lộ trình của đội bạn</div>
+    <div class="map-wrap" id="mapWrap">
+      <img id="mapBg" src="/img/map-placeholder.svg" alt="map">
+    </div>
+    <div id="stageDetail" class="card" style="margin-top:16px; display:none;"></div>
+
+    <div class="section-title">Lộ trình thi đấu</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Lượt</th><th>Trò</th><th>Loại</th><th>Địa điểm</th><th>Đối thủ / Ghi chú</th><th>Trạng thái</th></tr></thead>
+        <tbody id="scheduleBody"></tbody>
+      </table>
+      <div class="empty-hint" id="scheduleEmpty" style="display:none;">Ban tổ chức chưa xếp lộ trình cho đội bạn.</div>
+    </div>
+  </div>
+
+  <div id="tab-score" class="tab-panel" style="display:none;">
+    <div class="section-title">Điểm số của đội bạn</div>
+    <div class="card" style="text-align:center; margin-bottom:20px;">
+      <div class="small-note">Tổng điểm hiện tại</div>
+      <div style="font-size:2.6rem; font-weight:800; color: var(--warning);" id="bigPoints">0</div>
+    </div>
+
+    <div class="section-title">Bảng xếp hạng</div>
+    <div class="card" id="leaderboardBox"></div>
+
+    <div class="section-title">Lịch sử điểm</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Thời gian</th><th>Vòng</th><th>Lý do</th><th style="text-align:right;">Điểm</th></tr></thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+      <div class="empty-hint" id="historyEmpty" style="display:none;">Chưa có lịch sử điểm nào.</div>
+    </div>
+  </div>
+
+  <div id="tab-gift" class="tab-panel" style="display:none;">
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Đổi điểm lấy quà</div>
+      <div class="small-note">Điểm hiện có: <b id="giftPoints">0</b></div>
+    </div>
+    <div class="grid cols-3" id="giftGrid"></div>
+
+    <div class="section-title">Lịch sử đổi quà</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Thời gian</th><th>Quà</th><th style="text-align:right;">Điểm</th><th>Trạng thái</th></tr></thead>
+        <tbody id="redemptionBody"></tbody>
+      </table>
+      <div class="empty-hint" id="redemptionEmpty" style="display:none;">Chưa đổi quà nào.</div>
+    </div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script>
+let me = null;
+const socket = io();
+
+async function init() {
+  try {
+    const { team } = await api('GET', '/api/auth/team/me');
+    me = team;
+  } catch (e) {
+    window.location.href = '/';
+    return;
+  }
+  document.getElementById('teamNameLbl').textContent = me.name;
+  document.getElementById('teamSwatch').style.background = me.color;
+  document.getElementById('pointsVal').textContent = me.total_points;
+
+  loadMap();
+  loadScore();
+  loadGifts();
+  refreshFinalBanner();
+}
+
+document.getElementById('logoutBtn').onclick = async () => {
+  await api('POST', '/api/auth/team/logout');
+  window.location.href = '/';
+};
+
+// ---- Tabs ----
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
+  };
+});
+
+// ---- Map ----
+const KIND_LABELS = { doi_khang: 'Đối kháng', don: 'Đơn', chung_ket: 'Chung kết' };
+const STATUS_LABELS = { locked: 'Chưa mở', current: 'Đang thi', completed: 'Đã hoàn thành' };
+
+async function loadMap() {
+  const data = await api('GET', '/api/team/map');
+  document.getElementById('mapBg').src = data.background_image;
+  const wrap = document.getElementById('mapWrap');
+  wrap.querySelectorAll('.map-pin, .map-element').forEach(el => el.remove());
+
+  data.elements.forEach(elm => {
+    const div = document.createElement('div');
+    div.className = 'map-element';
+    div.style.left = elm.x_percent + '%';
+    div.style.top = elm.y_percent + '%';
+    div.innerHTML = `<div class="el-badge">${ICONS[elm.type] || '📍'} ${escapeHtml(elm.label || '')}</div>`;
+    if (elm.link_url) { div.style.cursor = 'pointer'; div.onclick = () => window.open(elm.link_url, '_blank'); }
+    wrap.appendChild(div);
+  });
+
+  const body = document.getElementById('scheduleBody');
+  const sorted = [...data.schedule].sort((a, b) => (a.round_no ?? 999) - (b.round_no ?? 999));
+  window.__schedule = sorted;
+  body.innerHTML = sorted.map((s, i) => `
+    <tr style="cursor:pointer;" onclick="showStageDetail(window.__schedule[${i}])">
+      <td>${s.round_no ?? '-'}</td>
+      <td>${ICONS[s.icon] || '🚩'} ${escapeHtml(s.name)}</td>
+      <td><span class="badge current">${KIND_LABELS[s.kind] || s.kind}</span></td>
+      <td>${escapeHtml(s.location_name || '-')}</td>
+      <td>${s.opponents && s.opponents.length ? s.opponents.map(o => `<span style="color:${o.color}">●</span> ${escapeHtml(o.name)}`).join(', ') : (s.note ? escapeHtml(s.note) : '-')}</td>
+      <td><span class="badge ${s.status}">${STATUS_LABELS[s.status] || s.status}</span></td>
+    </tr>
+  `).join('');
+  document.getElementById('scheduleEmpty').style.display = sorted.length ? 'none' : 'block';
+}
+
+function showStageDetail(stage) {
+  const box = document.getElementById('stageDetail');
+  box.style.display = 'block';
+  const opponentsHtml = stage.opponents && stage.opponents.length
+    ? `<p class="small-note">Đối thủ: ${stage.opponents.map(o => `<b style="color:${o.color}">${escapeHtml(o.name)}</b>`).join(', ')}</p>`
+    : (stage.note ? `<p class="small-note">Ghi chú: ${escapeHtml(stage.note)}</p>` : '');
+  box.innerHTML = `<h3 style="margin-top:0;">${ICONS[stage.icon] || '🚩'} ${stage.round_no ? `Lượt ${stage.round_no} — ` : ''}${escapeHtml(stage.name)}</h3>
+    <span class="badge current">${KIND_LABELS[stage.kind] || stage.kind}</span>
+    <span class="badge ${stage.status}">${STATUS_LABELS[stage.status] || stage.status}</span>
+    ${stage.location_name ? `<p class="small-note" style="margin-top:10px;">📍 Địa điểm: <b>${escapeHtml(stage.location_name)}</b></p>` : ''}
+    <p class="small-note" style="margin-top:10px;">${escapeHtml(stage.description || 'Chưa có mô tả.')}</p>
+    ${opponentsHtml}`;
+}
+
+// ---- Score ----
+async function loadScore() {
+  const data = await api('GET', '/api/team/score');
+  document.getElementById('bigPoints').textContent = data.team.total_points;
+  document.getElementById('pointsVal').textContent = data.team.total_points;
+  document.getElementById('giftPoints').textContent = data.team.total_points;
+
+  const maxPts = Math.max(1, ...data.leaderboard.map(t => t.total_points));
+  document.getElementById('leaderboardBox').innerHTML = data.leaderboard.map(t => `
+    <div class="leader-row">
+      <div class="name">${escapeHtml(t.name)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4, t.total_points / maxPts * 100)}%; background:${t.color}"></div></div>
+      <div class="val">${t.total_points}</div>
+    </div>
+  `).join('') || '<div class="empty-hint">Chưa có dữ liệu.</div>';
+
+  const body = document.getElementById('historyBody');
+  body.innerHTML = data.history.map(h => `
+    <tr>
+      <td>${fmtDateTime(h.created_at)}</td>
+      <td>${escapeHtml(h.round_name || '-')}</td>
+      <td>${escapeHtml(h.reason || '-')}</td>
+      <td style="text-align:right;"><span class="badge ${h.delta >= 0 ? 'positive' : 'negative'}">${h.delta >= 0 ? '+' : ''}${h.delta}</span></td>
+    </tr>
+  `).join('');
+  document.getElementById('historyEmpty').style.display = data.history.length ? 'none' : 'block';
+}
+
+// ---- Gifts ----
+async function loadGifts() {
+  const data = await api('GET', '/api/team/gifts');
+  document.getElementById('giftPoints').textContent = data.total_points;
+
+  document.getElementById('giftGrid').innerHTML = data.gifts.map(g => `
+    <div class="card gift-card">
+      <div class="gift-img">${g.image_url ? `<img src="${escapeHtml(g.image_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">` : '🎁'}</div>
+      <h4>${escapeHtml(g.name)}</h4>
+      <div class="small-note">${escapeHtml(g.description || '')}</div>
+      <div class="flex-between">
+        <span class="cost">${g.cost_points} điểm</span>
+        <span class="small-note">Còn ${g.stock}</span>
+      </div>
+      <button class="btn block sm" ${g.stock <= 0 || data.total_points < g.cost_points ? 'disabled' : ''} onclick="redeem(${g.id}, '${escapeHtml(g.name).replace(/'/g, "")}', ${g.cost_points})">
+        ${g.stock <= 0 ? 'Đã hết' : (data.total_points < g.cost_points ? 'Chưa đủ điểm' : 'Đổi ngay')}
+      </button>
+    </div>
+  `).join('') || '<div class="empty-hint">Chưa có quà nào.</div>';
+
+  const body = document.getElementById('redemptionBody');
+  body.innerHTML = data.myRedemptions.map(r => `
+    <tr>
+      <td>${fmtDateTime(r.created_at)}</td>
+      <td>${escapeHtml(r.gift_name)}</td>
+      <td style="text-align:right;">-${r.points_spent}</td>
+      <td><span class="badge ${r.status}">${({pending:'Chờ duyệt', approved:'Đã duyệt', rejected:'Từ chối', delivered:'Đã nhận'})[r.status]}</span></td>
+    </tr>
+  `).join('');
+  document.getElementById('redemptionEmpty').style.display = data.myRedemptions.length ? 'none' : 'block';
+}
+
+async function redeem(giftId, giftName, cost) {
+  if (!confirm(`Đổi ${cost} điểm lấy "${giftName}"?`)) return;
+  try {
+    await api('POST', `/api/team/gifts/${giftId}/redeem`);
+    toast('Đổi quà thành công! Chờ ban tổ chức xác nhận.');
+    loadGifts();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ---- Final round banner ----
+async function refreshFinalBanner() {
+  try {
+    const state = await api('GET', '/api/team/final/state');
+    document.getElementById('finalBanner').style.display = state.phase !== 'idle' ? 'block' : 'none';
+  } catch (e) {}
+}
+
+// ---- Realtime ----
+socket.on('score:update', (payload) => {
+  if (payload.team_id === me.id) {
+    document.getElementById('pointsVal').textContent = payload.total_points;
+    loadScore();
+    loadGifts();
+  }
+});
+socket.on('redemption:update', () => loadGifts());
+socket.on('map:update', () => loadMap());
+socket.on('final:state', (state) => {
+  document.getElementById('finalBanner').style.display = state.phase !== 'idle' ? 'block' : 'none';
+});
+
+init();
+</script>
+</body>
+</html>

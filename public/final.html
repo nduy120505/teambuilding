@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ai thông minh hơn sinh viên năm nhất · Teambuilding FIT</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  .final-top {
+    padding: 14px 20px; display:flex; justify-content: space-between; align-items:center;
+    border-bottom: 1px solid var(--border);
+  }
+  .final-stage { flex: 1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 26px; padding: 20px; text-align:center; }
+  #questionCard { max-width: 700px; width: 100%; }
+  #questionText { font-size: 1.4rem; font-weight: 700; line-height: 1.5; }
+  #phaseLabel { font-size: 1rem; color: var(--text-dim); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+
+  .buzzer-btn {
+    width: 220px; height: 220px; border-radius: 50%; border: none; cursor: pointer;
+    background: radial-gradient(circle at 35% 30%, #ff6b6b, #c0392b);
+    box-shadow: 0 12px 0 #8e2a20, 0 16px 30px rgba(0,0,0,.5);
+    color: white; font-size: 1.6rem; font-weight: 800; letter-spacing: .05em;
+    transition: transform .05s;
+  }
+  .buzzer-btn:active { transform: translateY(10px); box-shadow: 0 2px 0 #8e2a20, 0 6px 14px rgba(0,0,0,.5); }
+  .buzzer-btn:disabled { background: radial-gradient(circle at 35% 30%, #5a6178, #333c52); box-shadow: 0 12px 0 #262c40, 0 16px 30px rgba(0,0,0,.3); cursor: not-allowed; }
+  .buzzer-btn.ready { animation: buzzGlow 1s infinite alternate; }
+  @keyframes buzzGlow { from { box-shadow: 0 12px 0 #8e2a20, 0 0 20px 4px rgba(255,107,107,.4); } to { box-shadow: 0 12px 0 #8e2a20, 0 0 46px 14px rgba(255,107,107,.85); } }
+
+  #winnerBanner { font-size: 1.3rem; font-weight: 800; padding: 14px 26px; border-radius: 14px; }
+
+  #startOverlay {
+    position: fixed; inset: 0; background: var(--bg); z-index: 50; display:flex; align-items:center; justify-content:center;
+    flex-direction: column; gap: 20px; text-align:center; padding: 20px;
+  }
+  #warnOverlay {
+    position: fixed; inset: 0; background: rgba(200, 40, 40, .92); z-index: 60; display:none;
+    align-items:center; justify-content:center; flex-direction:column; gap: 16px; text-align:center; padding:20px;
+  }
+  #violationCount { font-size: .85rem; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div id="startOverlay">
+  <div class="brand" style="font-size:1.6rem;"><span class="dot"></span> Ai thông minh hơn sinh viên năm nhất</div>
+  <p class="subtitle" style="max-width:520px;">
+    Khi bấm "Bắt đầu thi", màn hình sẽ chuyển sang chế độ toàn màn hình. Vui lòng
+    <b>không chuyển tab hoặc thoát toàn màn hình</b> trong suốt phần thi — mọi vi phạm sẽ được
+    ghi nhận và gửi tới ban tổ chức theo thời gian thực.
+  </p>
+  <button class="btn" id="startBtn" style="font-size:1.1rem; padding:14px 28px;">🚀 Bắt đầu thi</button>
+  <a href="/team.html" class="small-note">← Quay lại trang đội</a>
+</div>
+
+<div id="warnOverlay">
+  <div style="font-size:3rem;">⚠️</div>
+  <div style="font-size:1.4rem; font-weight:800;">Đã rời khỏi màn hình thi đấu!</div>
+  <p style="max-width:480px;">Vi phạm này đã được ghi nhận và gửi cho ban tổ chức. Vui lòng quay lại toàn màn hình để tiếp tục.</p>
+  <button class="btn" id="reenterBtn">Quay lại thi đấu</button>
+</div>
+
+<div class="final-top">
+  <div class="team-pill"><span class="swatch" id="teamSwatch"></span><span id="teamNameLbl">...</span></div>
+  <div id="violationCount"></div>
+  <button class="btn secondary sm" id="exitBtn">Thoát</button>
+</div>
+
+<div class="final-stage">
+  <div id="phaseLabel">Đang chờ ban tổ chức mở câu hỏi...</div>
+
+  <div id="questionCard" class="card" style="display:none;">
+    <div class="small-note" id="questionMeta">Câu hỏi</div>
+    <div id="questionText"></div>
+  </div>
+
+  <div id="winnerBanner" style="display:none;"></div>
+
+  <button class="buzzer-btn" id="buzzerBtn" disabled>BẤM CHUÔNG</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script>
+let me = null;
+let intentionalExit = false;
+let violations = 0;
+const socket = io();
+
+async function init() {
+  try {
+    const { team } = await api('GET', '/api/auth/team/me');
+    me = team;
+  } catch (e) { window.location.href = '/'; return; }
+  document.getElementById('teamNameLbl').textContent = me.name;
+  document.getElementById('teamSwatch').style.background = me.color;
+}
+init();
+
+document.getElementById('startBtn').onclick = async () => {
+  try { await document.documentElement.requestFullscreen(); } catch (e) { /* mot so trinh duyet co the tu choi, van cho tiep tuc */ }
+  document.getElementById('startOverlay').style.display = 'none';
+};
+
+document.getElementById('reenterBtn').onclick = async () => {
+  try { await document.documentElement.requestFullscreen(); } catch (e) {}
+  document.getElementById('warnOverlay').style.display = 'none';
+};
+
+document.getElementById('exitBtn').onclick = () => {
+  if (!confirm('Bạn có chắc muốn thoát khỏi vòng chung kết?')) return;
+  intentionalExit = true;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  window.location.href = '/team.html';
+};
+
+function reportViolation(type, detail) {
+  if (intentionalExit) return;
+  violations++;
+  document.getElementById('violationCount').textContent = `Vi phạm: ${violations}`;
+  document.getElementById('warnOverlay').style.display = 'flex';
+  api('POST', '/api/team/final/violation', { type, detail: detail || '' }).catch(() => {});
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !intentionalExit) reportViolation('tab_hidden', 'Chuyển tab hoặc thu nhỏ cửa sổ');
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && !intentionalExit) reportViolation('fullscreen_exit', 'Thoát chế độ toàn màn hình');
+});
+window.addEventListener('blur', () => {
+  if (!intentionalExit && document.getElementById('startOverlay').style.display === 'none') {
+    // blur nhe hon tab_hidden (vd: alt-tab tren cung 1 man hinh), van ghi nhan nhung khong lam phien qua nhieu
+  }
+});
+window.addEventListener('beforeunload', (e) => {
+  if (!intentionalExit) { e.preventDefault(); e.returnValue = ''; }
+});
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+document.addEventListener('keydown', (e) => {
+  // Chan bot mot so phim tat pho bien de chuyen tab / mo devtools (khong the chan tuyet doi)
+  const blocked = (e.key === 'F11') || (e.ctrlKey && e.key.toLowerCase() === 't') ||
+                   (e.ctrlKey && e.key.toLowerCase() === 'w') || (e.altKey && e.key === 'Tab') ||
+                   (e.key === 'F12') || (e.ctrlKey && e.shiftKey && ['i','j','c'].includes(e.key.toLowerCase()));
+  if (blocked) e.preventDefault();
+});
+
+// ---- Buzzer logic ----
+const buzzerBtn = document.getElementById('buzzerBtn');
+buzzerBtn.onclick = () => socket.emit('final:buzz');
+
+function render(state) {
+  const phaseLabel = document.getElementById('phaseLabel');
+  const qCard = document.getElementById('questionCard');
+  const winnerBanner = document.getElementById('winnerBanner');
+
+  if (!state.question) {
+    phaseLabel.textContent = 'Đang chờ ban tổ chức mở câu hỏi...';
+    qCard.style.display = 'none';
+    winnerBanner.style.display = 'none';
+    buzzerBtn.disabled = true;
+    buzzerBtn.classList.remove('ready');
+    buzzerBtn.textContent = 'BẤM CHUÔNG';
+    return;
+  }
+
+  qCard.style.display = 'block';
+  document.getElementById('questionMeta').textContent = `Câu hỏi #${state.question.order_index} · ${state.question.points} điểm`;
+  document.getElementById('questionText').textContent = state.question.question_text;
+
+  if (state.phase === 'question_open') {
+    phaseLabel.textContent = '🟢 Chuông đang mở — Bấm ngay!';
+    winnerBanner.style.display = 'none';
+    buzzerBtn.disabled = false;
+    buzzerBtn.classList.add('ready');
+    buzzerBtn.textContent = 'BẤM CHUÔNG';
+  } else if (state.phase === 'buzzed') {
+    buzzerBtn.disabled = true;
+    buzzerBtn.classList.remove('ready');
+    const isMe = state.winnerTeam && me && state.winnerTeam.id === me.id;
+    phaseLabel.textContent = isMe ? '🎉 Bạn đã giành quyền trả lời!' : '🔒 Đã có đội giành quyền trả lời';
+    buzzerBtn.textContent = isMe ? 'BẠN ĐÃ BẤM!' : 'ĐÃ KHOÁ';
+    winnerBanner.style.display = 'block';
+    winnerBanner.style.background = state.winnerTeam ? state.winnerTeam.color + '33' : '';
+    winnerBanner.style.color = state.winnerTeam ? state.winnerTeam.color : '';
+    winnerBanner.textContent = state.winnerTeam ? `Đội trả lời: ${state.winnerTeam.name}` : '';
+  } else if (state.phase === 'wrong_cooldown') {
+    phaseLabel.textContent = '❌ Trả lời sai — chuông sẽ mở lại sau giây lát cho các đội khác...';
+    buzzerBtn.disabled = true;
+    buzzerBtn.classList.remove('ready');
+    buzzerBtn.textContent = 'CHỜ MỞ LẠI...';
+    winnerBanner.style.display = 'none';
+  } else {
+    phaseLabel.textContent = 'Đang chờ ban tổ chức...';
+    buzzerBtn.disabled = true;
+    buzzerBtn.classList.remove('ready');
+    winnerBanner.style.display = 'none';
+  }
+}
+
+socket.on('final:state', render);
+</script>
+</body>
+</html>

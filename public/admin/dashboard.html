@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quản trị · Teambuilding FIT</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .modal-backdrop { position: fixed; inset:0; background: rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index: 100; }
+  .modal-box { background: var(--card); border:1px solid var(--border); border-radius: var(--radius); padding:24px; width: 100%; max-width: 440px; max-height: 85vh; overflow-y:auto; }
+  .row-actions { display:flex; gap:6px; flex-wrap: wrap; }
+  .mini-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap:6px; }
+  .stage-cell { padding:6px; border-radius:8px; background: var(--bg-soft); text-align:center; cursor:pointer; font-size:.75rem; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand" style="font-size:1.05rem;"><span class="dot"></span> Quản trị Teambuilding FIT</div>
+  <button class="btn secondary sm" id="logoutBtn">Đăng xuất</button>
+</div>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="teams">👥 Bảng xếp hạng</button>
+    <button class="tab-btn" data-tab="map">🗺️ Bản đồ</button>
+    <button class="tab-btn" data-tab="gifts">🎁 Đổi thưởng</button>
+    <button class="tab-btn" data-tab="final">🔔 Ai thông minh hơn sinh viên năm nhất</button>
+  </div>
+
+  <!-- ===================== TEAMS ===================== -->
+  <div id="tab-teams" class="tab-panel">
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Danh sách đội</div>
+      <button class="btn sm" onclick="openTeamModal()">+ Thêm đội</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Mã đội</th><th>Tên đội</th><th>Điểm</th><th>Thao tác</th></tr></thead>
+        <tbody id="teamsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-title">Tính điểm trò chơi</div>
+    <div class="card">
+      <label>Chọn trò chơi</label>
+      <select id="scoringGameSelect" onchange="renderScoringForm()">
+        <option value="khoi_dong">Trò khởi động</option>
+        <option value="pha_vong_doat_bau">Phá vòng đoạt báu</option>
+        <option value="ra_dau_bat_chu">Ra Dấu Bắt Chữ</option>
+        <option value="mach_than_duoc">Mạch Thần Dược</option>
+        <option value="noi_vong_tay_lon">Nối vòng tay lớn</option>
+        <option value="cau_hoi_doi_gio">Câu hỏi đợi giờ</option>
+      </select>
+      <div id="scoringForm" style="margin-top:14px;"></div>
+      <button class="btn block" style="margin-top:14px;" onclick="submitScoring()">Tính & áp dụng điểm</button>
+    </div>
+
+    <div class="section-title">Lịch sử điểm gần đây</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Thời gian</th><th>Đội</th><th>Vòng</th><th>Lý do</th><th style="text-align:right;">Điểm</th></tr></thead>
+        <tbody id="scoreHistoryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== MAP ===================== -->
+  <div id="tab-map" class="tab-panel" style="display:none;">
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Danh sách trò chơi</div>
+      <button class="btn sm" onclick="openStageModal()">+ Thêm trò</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>#</th><th>Tên trò</th><th>Loại</th><th>Địa điểm</th><th>Thao tác</th></tr></thead>
+        <tbody id="stagesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Roadmap từng đội</div>
+    </div>
+    <div class="card">
+      <div class="grid cols-2" style="margin-bottom:14px;">
+        <div>
+          <label>Chọn đội</label>
+          <select id="scheduleTeamSelect" onchange="loadTeamSchedule()"></select>
+        </div>
+        <div style="display:flex; align-items:flex-end;">
+          <button class="btn sm" onclick="openScheduleModal()">+ Thêm</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Lượt</th><th>Trò</th><th>Loại</th><th>Địa điểm</th><th>Đối thủ / Ghi chú</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+        <tbody id="scheduleBody"></tbody>
+      </table>
+      <div class="empty-hint" id="scheduleEmpty" style="display:none;">Trống</div>
+    </div>
+
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Phần tử tự do trên bản đồ (chỗ trống để chèn thêm sau)</div>
+      <button class="btn sm" onclick="openElementModal()">+ Thêm phần tử</button>
+    </div>
+    <p class="small-note">Dùng mục này để cắm thêm icon/ghi chú/hình ảnh tuỳ ý lên bản đồ — cho cả các đội hoặc riêng từng đội — mà không cần sửa code.</p>
+    <div class="card">
+      <table>
+        <thead><tr><th>Nhãn</th><th>Loại</th><th>Đội</th><th>Vị trí</th><th>Thao tác</th></tr></thead>
+        <tbody id="elementsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== GIFTS ===================== -->
+  <div id="tab-gifts" class="tab-panel" style="display:none;">
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Đổi điểm</div>
+      <button class="btn sm" onclick="openGiftModal()">+ Thêm phần thưởng</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Tên quà</th><th>Điểm</th><th>Kho</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+        <tbody id="giftsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-title">Yêu cầu đổi thưởng</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Thời gian</th><th>Đội</th><th>Quà</th><th>Điểm</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+        <tbody id="redemptionsBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ===================== FINAL ===================== -->
+  <div id="tab-final" class="tab-panel" style="display:none;">
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Điều khiển vòng chung kết</div>
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="grid cols-2">
+        <div>
+          <label>Chọn câu hỏi để mở chuông</label>
+          <select id="questionSelect"></select>
+          <button class="btn block" onclick="openQuestion()">🟢 Mở câu hỏi & mở chuông</button>
+        </div>
+        <div>
+          <label>Trạng thái hiện tại</label>
+          <div class="card" id="liveState" style="background:var(--bg-soft);">Đang tải...</div>
+        </div>
+      </div>
+      <div class="row-actions" style="margin-top:16px;">
+        <button class="btn secondary sm" onclick="resetBuzzer()"> Bắt đầu</button>
+        <button class="btn success sm" onclick="judge(true)"> Trả lời đúng</button>
+        <button class="btn danger sm" onclick="judge(false)"> Trả lời sai</button>
+        <button class="btn secondary sm" onclick="closeQuestion()">⏹ Đóng câu hỏi</button>
+      </div>
+    </div>
+
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Ngân hàng câu hỏi</div>
+      <button class="btn sm" onclick="openQuestionModal()">+ Thêm câu hỏi</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>#</th><th>Câu hỏi</th><th>Đáp án</th><th>Điểm</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+        <tbody id="questionsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="section-title">Nhật ký vi phạm (chuyển tab / thoát toàn màn hình)</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Thời gian</th><th>Đội</th><th>Loại vi phạm</th><th>Chi tiết</th></tr></thead>
+        <tbody id="violationsBody"></tbody>
+      </table>
+      <div class="empty-hint" id="violationsEmpty" style="display:none;">Chưa có vi phạm nào.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/common.js"></script>
+<script>
+const socket = io();
+let TEAMS = [], STAGES = [], QUESTIONS = [], CURRENT_SCHEDULE = [];
+const KIND_LABELS = { doi_khang: 'Đối kháng', don: 'Đơn', chung_ket: 'Chung kết' };
+
+async function guard() {
+  try { await api('GET', '/api/auth/admin/me'); } catch (e) { window.location.href = '/admin/'; }
+}
+guard();
+
+document.getElementById('logoutBtn').onclick = async () => {
+  await api('POST', '/api/auth/admin/logout');
+  window.location.href = '/admin/';
+};
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.getElementById('tab-' + btn.dataset.tab).style.display = 'block';
+  };
+});
+
+function closeModal() { document.getElementById('modalBackdrop').style.display = 'none'; }
+function showModal(html) {
+  document.getElementById('modalBox').innerHTML = html;
+  document.getElementById('modalBackdrop').style.display = 'flex';
+}
+document.getElementById('modalBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'modalBackdrop') closeModal();
+});
+
+/* ===================== TEAMS & SCORES ===================== */
+async function loadTeams() {
+  const { teams } = await api('GET', '/api/admin/teams');
+  TEAMS = teams;
+  document.getElementById('teamsBody').innerHTML = teams.map(t => `
+    <tr>
+      <td><b>${escapeHtml(t.code)}</b></td>
+      <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${t.color};margin-right:6px;"></span>${escapeHtml(t.name)}</td>
+      <td><b>${t.total_points}</b></td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openScoreModal(${t.id}, '${escapeHtml(t.name).replace(/'/g,"")}')">±Điểm</button>
+        <button class="btn secondary sm" onclick="openTeamModal(${t.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteTeam(${t.id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có đội nào.</td></tr>';
+
+  populateElementTeamOptions();
+  populateScheduleTeamSelect();
+  renderScoringForm();
+}
+
+async function loadScoreHistory() {
+  const { history } = await api('GET', '/api/admin/scores/history');
+  document.getElementById('scoreHistoryBody').innerHTML = history.map(h => `
+    <tr>
+      <td>${fmtDateTime(h.created_at)}</td>
+      <td>${escapeHtml(h.team_name)}</td>
+      <td>${escapeHtml(h.round_name || '-')}</td>
+      <td>${escapeHtml(h.reason || '-')}</td>
+      <td style="text-align:right;"><span class="badge ${h.delta>=0?'positive':'negative'}">${h.delta>=0?'+':''}${h.delta}</span></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có lịch sử.</td></tr>';
+}
+
+function openTeamModal(id) {
+  const t = id ? TEAMS.find(x => x.id === id) : null;
+  showModal(`
+    <h3 style="margin-top:0;">${t ? 'Sửa đội' : 'Thêm đội mới'}</h3>
+    <label>Mã đội</label>
+    <input id="mCode" value="${t ? escapeHtml(t.code) : ''}" ${t ? 'disabled' : ''} placeholder="VD: DOI05">
+    <label>Tên đội</label>
+    <input id="mName" value="${t ? escapeHtml(t.name) : ''}" placeholder="VD: Đội Rồng Vàng">
+    <label>Màu đội</label>
+    <input id="mColor" type="color" value="${t ? t.color : '#22A559'}" style="height:44px; padding:4px;">
+    <label>${t ? 'Đổi mật khẩu (để trống nếu giữ nguyên)' : 'Mật khẩu'}</label>
+    <input id="mPassword" type="text" placeholder="Mật khẩu đăng nhập">
+    <div class="row-actions">
+      <button class="btn" onclick="saveTeam(${id || 'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function saveTeam(id) {
+  const name = document.getElementById('mName').value.trim();
+  const color = document.getElementById('mColor').value;
+  const password = document.getElementById('mPassword').value;
+  try {
+    if (id) {
+      await api('PUT', `/api/admin/teams/${id}`, { name, color, password: password || undefined });
+    } else {
+      const code = document.getElementById('mCode').value.trim();
+      if (!code || !password) return toast('Cần nhập mã đội và mật khẩu', 'error');
+      await api('POST', '/api/admin/teams', { code, name, color, password });
+    }
+    closeModal(); toast('Đã lưu đội'); loadTeams();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteTeam(id) {
+  if (!confirm('Xoá đội này? Toàn bộ lịch sử liên quan cũng sẽ bị xoá.')) return;
+  await api('DELETE', `/api/admin/teams/${id}`);
+  toast('Đã xoá đội'); loadTeams();
+}
+
+function openScoreModal(teamId, teamName) {
+  showModal(`
+    <h3 style="margin-top:0;">Cộng/trừ điểm — ${escapeHtml(teamName)}</h3>
+    <label>Số điểm (âm để trừ)</label>
+    <input id="sDelta" type="number" placeholder="VD: 10 hoặc -5">
+    <label>Tên vòng thi</label>
+    <input id="sRound" placeholder="VD: Chặng 2">
+    <label>Lý do</label>
+    <input id="sReason" placeholder="VD: Về nhất chặng vượt chướng ngại vật">
+    <div class="row-actions">
+      <button class="btn" onclick="submitScore(${teamId})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function submitScore(teamId) {
+  const delta = Number(document.getElementById('sDelta').value);
+  const round_name = document.getElementById('sRound').value.trim();
+  const reason = document.getElementById('sReason').value.trim();
+  if (!delta) return toast('Nhập số điểm hợp lệ', 'error');
+  try {
+    await api('POST', `/api/admin/teams/${teamId}/score`, { delta, round_name, reason });
+    closeModal(); toast('Đã cập nhật điểm'); loadTeams(); loadScoreHistory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ===================== TÍNH ĐIỂM TRÒ CHƠI ===================== */
+const SCORING_GAMES = {
+  khoi_dong: {
+    mode: 'single',
+    fieldLabel: 'Đội về nhất',
+  },
+  pha_vong_doat_bau: {
+    mode: 'per_team',
+    fields: [
+      { key: 'rounds_won', label: 'Số lượt thắng (0-3)', type: 'number', min: 0, max: 3, step: 1, default: 0 },
+      { key: 'violations', label: 'Số lần phạm luật (số đẩy)', type: 'number', min: 0, step: 1, default: 0 },
+    ],
+    compute: (v) => {
+      const ROUND_POINTS = { 0: 0, 1: 5, 2: 10, 3: 15 };
+      const rw = Math.max(0, Math.min(3, Math.round(Number(v.rounds_won) || 0)));
+      const vio = Math.max(0, Math.round(Number(v.violations) || 0));
+      return (ROUND_POINTS[rw] || 0) - vio * 3;
+    },
+  },
+  ra_dau_bat_chu: {
+    mode: 'per_team',
+    fields: [{ key: 'correct_guesses', label: 'Số lần đoán đúng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.correct_guesses) || 0)) * 2,
+  },
+  mach_than_duoc: {
+    mode: 'per_team',
+    fields: [{ key: 'balloons', label: 'Số bóng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.balloons) || 0)) * 3,
+  },
+  noi_vong_tay_lon: {
+    mode: 'ranking',
+    fields: [{ key: 'time_seconds', label: 'Thời gian (giây)', type: 'number', min: 0, step: 0.1 }],
+  },
+  cau_hoi_doi_gio: {
+    mode: 'per_team',
+    fields: [{ key: 'correct_answers', label: 'Số câu trả lời đúng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.correct_answers) || 0)) * 2,
+  },
+};
+
+function renderScoringForm() {
+  const game = document.getElementById('scoringGameSelect').value;
+  const cfg = SCORING_GAMES[game];
+  const box = document.getElementById('scoringForm');
+  if (!cfg) { box.innerHTML = ''; return; }
+
+  if (cfg.mode === 'single') {
+    box.innerHTML = `
+      <label>${cfg.fieldLabel}</label>
+      <select id="sg_single_team">
+        ${TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') || '<option value="">Chưa có đội</option>'}
+      </select>
+      <p class="small-note">Đội được chọn sẽ được cộng <b>+5 điểm</b>.</p>
+    `;
+    return;
+  }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>Đội</th>${cfg.fields.map(f => `<th>${escapeHtml(f.label)}</th>`).join('')}<th style="text-align:right;">Điểm dự kiến</th></tr></thead>
+      <tbody>
+        ${TEAMS.map(t => `
+          <tr>
+            <td>${escapeHtml(t.name)}</td>
+            ${cfg.fields.map(f => `<td><input class="sg-field" data-team="${t.id}" data-field="${f.key}" type="${f.type}"
+              ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}
+              value="${f.default !== undefined ? f.default : ''}" style="width:100px;" oninput="recomputeScoringPreview()"></td>`).join('')}
+            <td style="text-align:right;"><b id="sg-preview-${t.id}">-</b></td>
+          </tr>
+        `).join('') || `<tr><td colspan="${cfg.fields.length + 2}" class="empty-hint">Chưa có đội nào.</td></tr>`}
+      </tbody>
+    </table>
+  `;
+  recomputeScoringPreview();
+}
+
+function collectScoringEntries() {
+  const game = document.getElementById('scoringGameSelect').value;
+  const cfg = SCORING_GAMES[game];
+  if (!cfg) return { game, cfg, entries: [] };
+
+  if (cfg.mode === 'single') {
+    const teamId = Number(document.getElementById('sg_single_team')?.value);
+    return { game, cfg, entries: teamId ? [{ team_id: teamId }] : [] };
+  }
+
+  const byTeam = {};
+  document.querySelectorAll('.sg-field').forEach(el => {
+    const teamId = Number(el.dataset.team);
+    if (!byTeam[teamId]) byTeam[teamId] = { team_id: teamId };
+    byTeam[teamId][el.dataset.field] = el.value;
+  });
+  return { game, cfg, entries: Object.values(byTeam) };
+}
+
+function recomputeScoringPreview() {
+  const { cfg, entries } = collectScoringEntries();
+  if (!cfg || cfg.mode === 'single') return;
+
+  if (cfg.mode === 'ranking') {
+    const RANK_POINTS = [12, 9, 6, 3, 0];
+    const withTimes = entries
+      .map(e => ({ team_id: e.team_id, time_seconds: Number(e.time_seconds) }))
+      .filter(e => Number.isFinite(e.time_seconds) && e.time_seconds > 0)
+      .sort((a, b) => a.time_seconds - b.time_seconds);
+    TEAMS.forEach(t => {
+      const idx = withTimes.findIndex(e => e.team_id === t.id);
+      const elx = document.getElementById(`sg-preview-${t.id}`);
+      if (!elx) return;
+      elx.textContent = idx >= 0 ? `+${RANK_POINTS[idx] ?? 0} (hạng ${idx + 1})` : '-';
+    });
+    return;
+  }
+
+  entries.forEach(e => {
+    const pts = cfg.compute(e);
+    const elx = document.getElementById(`sg-preview-${e.team_id}`);
+    if (elx) elx.textContent = (pts >= 0 ? '+' : '') + pts;
+  });
+}
+
+async function submitScoring() {
+  const { game, cfg, entries } = collectScoringEntries();
+  if (!cfg) return;
+
+  let payloadEntries = entries;
+  if (cfg.mode === 'ranking') {
+    payloadEntries = entries.filter(e => e.time_seconds !== undefined && e.time_seconds !== '');
+  }
+  if (!payloadEntries.length) return toast('Chưa nhập dữ liệu để tính điểm', 'error');
+
+  try {
+    const { results } = await api('POST', `/api/admin/scoring/${game}`, { entries: payloadEntries });
+    toast(`Đã áp dụng điểm cho ${results.length} đội`);
+    loadTeams(); loadScoreHistory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ===================== MAP ===================== */
+async function loadMapSettings() {
+  const stages = await api('GET', '/api/admin/stages');
+  STAGES = stages.stages;
+  document.getElementById('stagesBody').innerHTML = STAGES.map(s => `
+    <tr>
+      <td>${s.order_index}</td>
+      <td>${ICONS[s.icon]||'🚩'} ${escapeHtml(s.name)}</td>
+      <td><span class="badge current">${KIND_LABELS[s.kind] || s.kind}</span></td>
+      <td>${escapeHtml(s.location_name || '-')}</td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openStageModal(${s.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteStage(${s.id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có trò nào.</td></tr>';
+  populateScheduleTeamSelect();
+
+  const elements = await api('GET', '/api/admin/map-elements');
+  document.getElementById('elementsBody').innerHTML = elements.elements.map(e => {
+    const team = TEAMS.find(t => t.id === e.team_id);
+    return `<tr>
+      <td>${ICONS[e.type]||'📍'} ${escapeHtml(e.label||'-')}</td>
+      <td>${escapeHtml(e.type)}</td>
+      <td>${team ? escapeHtml(team.name) : 'Tất cả đội'}</td>
+      <td>${e.x_percent}%, ${e.y_percent}%</td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openElementModal(${e.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteElement(${e.id})">Xoá</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có phần tử nào — dùng nút "+ Thêm phần tử" để chèn thêm sau.</td></tr>';
+}
+
+function openStageModal(id) {
+  const s = id ? STAGES.find(x => x.id === id) : null;
+  showModal(`
+    <h3 style="margin-top:0;">${s ? 'Sửa trò' : 'Thêm trò mới'}</h3>
+    <label>Tên trò</label><input id="stName" value="${s ? escapeHtml(s.name) : ''}">
+    <label>Mô tả</label><textarea id="stDesc" rows="3">${s ? escapeHtml(s.description||'') : ''}</textarea>
+    <label>Loại trò</label>
+    <select id="stKind">
+      <option value="doi_khang" ${s && s.kind==='doi_khang'?'selected':''}>Đối kháng (nhiều đội thi cùng nhau)</option>
+      <option value="don" ${s && s.kind==='don'?'selected':''}>Đơn (từng đội thi riêng)</option>
+      <option value="chung_ket" ${s && s.kind==='chung_ket'?'selected':''}>Chung kết</option>
+    </select>
+    <label>Thứ tự</label><input id="stOrder" type="number" value="${s ? s.order_index : STAGES.length+1}">
+    <label>Địa điểm</label>
+    <input id="stLocation" value="${s ? escapeHtml(s.location_name||'') : ''}" placeholder="VD: Tòa nhà A2">
+    <label>Icon</label>
+    <select id="stIcon">
+      ${Object.keys(ICONS).map(k => `<option value="${k}" ${s && s.icon===k?'selected':''}>${ICONS[k]} ${k}</option>`).join('')}
+    </select>
+    <div class="row-actions">
+      <button class="btn" onclick="saveStage(${id||'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function saveStage(id) {
+  const body = {
+    name: document.getElementById('stName').value.trim(),
+    description: document.getElementById('stDesc').value.trim(),
+    kind: document.getElementById('stKind').value,
+    order_index: Number(document.getElementById('stOrder').value) || 0,
+    location_name: document.getElementById('stLocation').value.trim(),
+    icon: document.getElementById('stIcon').value,
+  };
+  if (!body.name) return toast('Nhập tên trò', 'error');
+  try {
+    if (id) await api('PUT', `/api/admin/stages/${id}`, body);
+    else await api('POST', '/api/admin/stages', body);
+    closeModal(); toast('Đã lưu trò'); loadMapSettings();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteStage(id) {
+  if (!confirm('Xoá trò này? Lộ trình các đội đã xếp liên quan tới trò này cũng sẽ mất.')) return;
+  await api('DELETE', `/api/admin/stages/${id}`);
+  toast('Đã xoá trò'); loadMapSettings();
+}
+
+/* ===================== LỘ TRÌNH RIÊNG TỪNG ĐỘI ===================== */
+function populateScheduleTeamSelect() {
+  const sel = document.getElementById('scheduleTeamSelect');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') || '<option value="">Chưa có đội nào</option>';
+  if (prev && TEAMS.some(t => String(t.id) === prev)) sel.value = prev;
+  if (sel.value) loadTeamSchedule();
+}
+
+async function loadTeamSchedule() {
+  const teamId = document.getElementById('scheduleTeamSelect').value;
+  const body = document.getElementById('scheduleBody');
+  const empty = document.getElementById('scheduleEmpty');
+  if (!teamId) { body.innerHTML = ''; empty.style.display = 'block'; return; }
+  const { schedule } = await api('GET', `/api/admin/teams/${teamId}/schedule`);
+  CURRENT_SCHEDULE = schedule;
+  body.innerHTML = schedule.map(row => `
+    <tr>
+      <td>${row.round_no ?? '-'}</td>
+      <td>${ICONS[row.icon]||'🚩'} ${escapeHtml(row.stage_name)}</td>
+      <td><span class="badge current">${KIND_LABELS[row.stage_kind] || row.stage_kind}</span></td>
+      <td>${escapeHtml(row.location_name || '-')}</td>
+      <td>${row.opponents && row.opponents.length ? row.opponents.map(o => `<span style="color:${o.color}">●</span> ${escapeHtml(o.name)}`).join(', ') : (row.note ? escapeHtml(row.note) : '-')}</td>
+      <td><span class="badge ${row.status}">${({locked:'Chưa mở',current:'Đang thi',completed:'Đã xong'})[row.status]||row.status}</span></td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openScheduleModal(${row.stage_id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteScheduleEntry(${row.stage_id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('');
+  empty.style.display = schedule.length ? 'none' : 'block';
+}
+
+function openScheduleModal(stageId) {
+  const teamId = Number(document.getElementById('scheduleTeamSelect').value);
+  if (!teamId) return toast('Chọn 1 đội trước', 'error');
+  const existing = stageId ? CURRENT_SCHEDULE.find(r => r.stage_id === stageId) : null;
+  const opponentIds = existing && existing.opponents ? existing.opponents.map(o => o.id) : [];
+
+  showModal(`
+    <h3 style="margin-top:0;">${existing ? 'Sửa mục lộ trình' : 'Thêm vào lộ trình'}</h3>
+    <label>Trò</label>
+    <select id="schStage" ${existing ? 'disabled' : ''} onchange="renderScheduleKindFields()">
+      ${STAGES.map(s => `<option value="${s.id}" data-kind="${s.kind}" ${existing && existing.stage_id===s.id ? 'selected' : (!existing && s.id===stageId ? 'selected':'')}>${escapeHtml(s.name)} (${KIND_LABELS[s.kind]||s.kind})</option>`).join('')}
+    </select>
+    <div class="grid cols-2">
+      <div><label>Lượt thứ mấy trong lộ trình đội</label><input id="schRound" type="number" value="${existing ? (existing.round_no ?? '') : ''}" placeholder="VD: 1"></div>
+      <div><label>Trạng thái</label>
+        <select id="schStatus">
+          <option value="locked" ${existing && existing.status==='locked'?'selected':''}>Chưa mở</option>
+          <option value="current" ${existing && existing.status==='current'?'selected':''}>Đang thi</option>
+          <option value="completed" ${existing && existing.status==='completed'?'selected':''}>Đã xong</option>
+        </select>
+      </div>
+    </div>
+    <div id="schKindFields"></div>
+    <div class="row-actions">
+      <button class="btn" onclick="saveScheduleEntry(${teamId})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+  window.__schOpponentIds = opponentIds;
+  window.__schNote = existing ? (existing.note || '') : '';
+  renderScheduleKindFields();
+}
+
+function renderScheduleKindFields() {
+  const sel = document.getElementById('schStage');
+  const box = document.getElementById('schKindFields');
+  if (!sel || !box) return;
+  const teamId = Number(document.getElementById('scheduleTeamSelect').value);
+  const kind = sel.selectedOptions[0]?.dataset.kind;
+  const opponentIds = window.__schOpponentIds || [];
+  const note = window.__schNote || '';
+  if (kind === 'doi_khang') {
+    box.innerHTML = `
+      <label>Đối thủ (chọn 1 hoặc nhiều đội — nhiều hơn 1 = tam đấu)</label>
+      ${TEAMS.filter(t => t.id !== teamId).map(t => `
+        <label style="display:flex; align-items:center; gap:8px; font-weight:400;">
+          <input type="checkbox" class="sch-opponent" value="${t.id}" ${opponentIds.includes(t.id)?'checked':''}>
+          <span style="color:${t.color}">●</span> ${escapeHtml(t.name)}
+        </label>
+      `).join('') || '<p class="small-note">Cần thêm đội khác để chọn đối thủ.</p>'}
+    `;
+  } else {
+    box.innerHTML = `
+      <label>Ghi chú (VD: "Làn 2", tuỳ chọn)</label>
+      <input id="schNote" value="${escapeHtml(note)}">
+    `;
+  }
+}
+
+async function saveScheduleEntry(teamId) {
+  const stageId = Number(document.getElementById('schStage').value);
+  const kind = document.getElementById('schStage').selectedOptions[0]?.dataset.kind;
+  const round_no = document.getElementById('schRound').value ? Number(document.getElementById('schRound').value) : null;
+  const status = document.getElementById('schStatus').value;
+
+  let team_ids = [teamId];
+  let note = null;
+  if (kind === 'doi_khang') {
+    const opponentIds = Array.from(document.querySelectorAll('.sch-opponent:checked')).map(el => Number(el.value));
+    team_ids = [teamId, ...opponentIds];
+  } else {
+    note = document.getElementById('schNote') ? document.getElementById('schNote').value.trim() : '';
+  }
+
+  try {
+    await api('POST', '/api/admin/schedule', { stage_id: stageId, team_ids, round_no, status, note });
+    closeModal(); toast('Đã lưu lộ trình'); loadTeamSchedule();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteScheduleEntry(stageId) {
+  const teamId = document.getElementById('scheduleTeamSelect').value;
+  if (!teamId) return;
+  if (!confirm('Xoá mục này khỏi lộ trình của đội?')) return;
+  await api('DELETE', `/api/admin/teams/${teamId}/schedule/${stageId}`);
+  toast('Đã xoá'); loadTeamSchedule();
+}
+
+function populateElementTeamOptions(selectedId) {
+  const sel = document.getElementById('elTeam');
+  if (!sel) return;
+  sel.innerHTML = `<option value="">Tất cả đội</option>` + TEAMS.map(t => `<option value="${t.id}" ${selectedId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('');
+}
+
+function openElementModal(id) {
+  showModal(`
+    <h3 style="margin-top:0;">${id ? 'Sửa phần tử' : 'Thêm phần tử trên bản đồ'}</h3>
+    <label>Nhãn hiển thị</label><input id="elLabel" placeholder="VD: Trạm nước, Bảng thông báo...">
+    <label>Loại</label>
+    <select id="elType">
+      <option value="marker">📍 Marker</option>
+      <option value="note">📝 Ghi chú</option>
+      <option value="image">🖼️ Hình ảnh</option>
+      <option value="custom">✨ Tuỳ chỉnh</option>
+    </select>
+    <label>Hiển thị cho đội</label>
+    <select id="elTeam"></select>
+    <div class="grid cols-2">
+      <div><label>Vị trí X (%)</label><input id="elX" type="number" value="50"></div>
+      <div><label>Vị trí Y (%)</label><input id="elY" type="number" value="50"></div>
+    </div>
+    <label>Link (tuỳ chọn, mở khi bấm vào)</label><input id="elLink" placeholder="https://...">
+    <div class="row-actions">
+      <button class="btn" onclick="saveElement(${id||'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+  populateElementTeamOptions();
+}
+
+async function saveElement(id) {
+  const body = {
+    label: document.getElementById('elLabel').value.trim(),
+    type: document.getElementById('elType').value,
+    team_id: document.getElementById('elTeam').value ? Number(document.getElementById('elTeam').value) : null,
+    x_percent: Number(document.getElementById('elX').value),
+    y_percent: Number(document.getElementById('elY').value),
+    link_url: document.getElementById('elLink').value.trim(),
+  };
+  try {
+    if (id) await api('PUT', `/api/admin/map-elements/${id}`, body);
+    else await api('POST', '/api/admin/map-elements', body);
+    closeModal(); toast('Đã lưu phần tử'); loadMapSettings();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteElement(id) {
+  if (!confirm('Xoá phần tử này?')) return;
+  await api('DELETE', `/api/admin/map-elements/${id}`);
+  toast('Đã xoá'); loadMapSettings();
+}
+
+/* ===================== GIFTS ===================== */
+async function loadGifts() {
+  const { gifts } = await api('GET', '/api/admin/gifts');
+  document.getElementById('giftsBody').innerHTML = gifts.map(g => `
+    <tr>
+      <td>${escapeHtml(g.name)}</td>
+      <td>${g.cost_points}</td>
+      <td>${g.stock}</td>
+      <td><span class="badge ${g.active ? 'completed':'locked'}">${g.active ? 'Đang mở' : 'Đã ẩn'}</span></td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openGiftModal(${g.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteGift(${g.id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có quà nào.</td></tr>';
+}
+
+function openGiftModal(id) {
+  showModal(`
+    <h3 style="margin-top:0;">${id?'Sửa quà':'Thêm quà mới'}</h3>
+    <label>Tên quà</label><input id="gName">
+    <label>Mô tả</label><textarea id="gDesc" rows="2"></textarea>
+    <div class="grid cols-2">
+      <div><label>Điểm cần đổi</label><input id="gCost" type="number"></div>
+      <div><label>Số lượng kho</label><input id="gStock" type="number"></div>
+    </div>
+    <label>URL hình ảnh (tuỳ chọn)</label><input id="gImage">
+    <div class="row-actions">
+      <button class="btn" onclick="saveGift(${id||'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function saveGift(id) {
+  const body = {
+    name: document.getElementById('gName').value.trim(),
+    description: document.getElementById('gDesc').value.trim(),
+    cost_points: Number(document.getElementById('gCost').value),
+    stock: Number(document.getElementById('gStock').value),
+    image_url: document.getElementById('gImage').value.trim(),
+  };
+  if (!body.name || !body.cost_points) return toast('Nhập tên và số điểm', 'error');
+  try {
+    if (id) await api('PUT', `/api/admin/gifts/${id}`, body);
+    else await api('POST', '/api/admin/gifts', body);
+    closeModal(); toast('Đã lưu quà'); loadGifts();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteGift(id) {
+  if (!confirm('Xoá quà này?')) return;
+  await api('DELETE', `/api/admin/gifts/${id}`);
+  toast('Đã xoá'); loadGifts();
+}
+
+async function loadRedemptions() {
+  const { redemptions } = await api('GET', '/api/admin/redemptions');
+  document.getElementById('redemptionsBody').innerHTML = redemptions.map(r => `
+    <tr>
+      <td>${fmtDateTime(r.created_at)}</td>
+      <td>${escapeHtml(r.team_name)}</td>
+      <td>${escapeHtml(r.gift_name)}</td>
+      <td>${r.points_spent}</td>
+      <td><span class="badge ${r.status}">${({pending:'Chờ duyệt',approved:'Đã duyệt',rejected:'Từ chối',delivered:'Đã nhận'})[r.status]}</span></td>
+      <td class="row-actions">
+        ${r.status === 'pending' ? `<button class="btn success sm" onclick="setRedemption(${r.id},'approved')">Duyệt</button><button class="btn danger sm" onclick="setRedemption(${r.id},'rejected')">Từ chối</button>` : ''}
+        ${r.status === 'approved' ? `<button class="btn sm" onclick="setRedemption(${r.id},'delivered')">Đã giao</button>` : ''}
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty-hint">Chưa có yêu cầu nào.</td></tr>';
+}
+
+async function setRedemption(id, status) {
+  try { await api('PUT', `/api/admin/redemptions/${id}`, { status }); toast('Đã cập nhật'); loadRedemptions(); loadTeams(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+/* ===================== FINAL ROUND ===================== */
+async function loadQuestions() {
+  const { questions } = await api('GET', '/api/admin/final/questions');
+  QUESTIONS = questions;
+  document.getElementById('questionSelect').innerHTML = questions
+    .filter(q => q.status !== 'closed')
+    .map(q => `<option value="${q.id}">#${q.order_index} — ${escapeHtml(q.question_text).slice(0,50)}</option>`).join('') || '<option value="">Không có câu hỏi khả dụng</option>';
+
+  document.getElementById('questionsBody').innerHTML = questions.map(q => `
+    <tr>
+      <td>${q.order_index}</td>
+      <td>${escapeHtml(q.question_text)}</td>
+      <td>${escapeHtml(q.answer_text||'-')}</td>
+      <td>${q.points}</td>
+      <td><span class="badge ${q.status==='closed'?'completed':(q.status==='active'?'current':'locked')}">${({pending:'Chưa dùng',active:'Đang mở',closed:'Đã xong'})[q.status]}</span></td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openQuestionModal(${q.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteQuestion(${q.id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="empty-hint">Chưa có câu hỏi nào.</td></tr>';
+}
+
+function openQuestionModal(id) {
+  const q = id ? QUESTIONS.find(x => x.id === id) : null;
+  showModal(`
+    <h3 style="margin-top:0;">${q?'Sửa câu hỏi':'Thêm câu hỏi'}</h3>
+    <label>Nội dung câu hỏi</label><textarea id="qText" rows="3">${q?escapeHtml(q.question_text):''}</textarea>
+    <label>Đáp án (chỉ ban tổ chức thấy)</label>
+    <input id="qAnswer" value="${q?escapeHtml(q.answer_text||''):''}" placeholder="VD: A (trắc nghiệm) hoặc Hà Nội (câu trả lời ngắn)">
+    <div class="grid cols-2">
+      <div><label>Điểm</label><input id="qPoints" type="number" value="${q?q.points:10}"></div>
+      <div><label>Thứ tự</label><input id="qOrder" type="number" value="${q?q.order_index:QUESTIONS.length+1}"></div>
+    </div>
+    <div class="row-actions">
+      <button class="btn" onclick="saveQuestion(${id||'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function saveQuestion(id) {
+  const body = {
+    question_text: document.getElementById('qText').value.trim(),
+    answer_text: document.getElementById('qAnswer').value.trim(),
+    points: Number(document.getElementById('qPoints').value) || 10,
+    order_index: Number(document.getElementById('qOrder').value) || 0,
+  };
+  if (!body.question_text) return toast('Nhập nội dung câu hỏi', 'error');
+  try {
+    if (id) await api('PUT', `/api/admin/final/questions/${id}`, body);
+    else await api('POST', '/api/admin/final/questions', body);
+    closeModal(); toast('Đã lưu câu hỏi'); loadQuestions();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteQuestion(id) {
+  if (!confirm('Xoá câu hỏi này?')) return;
+  await api('DELETE', `/api/admin/final/questions/${id}`);
+  toast('Đã xoá'); loadQuestions();
+}
+
+async function openQuestion() {
+  const id = document.getElementById('questionSelect').value;
+  if (!id) return toast('Chọn 1 câu hỏi', 'error');
+  await api('POST', `/api/admin/final/open/${id}`);
+  toast('Đã mở câu hỏi + chuông');
+}
+async function resetBuzzer() { await api('POST', '/api/admin/final/reset-buzzer'); toast('Đã reset chuông'); }
+async function closeQuestion() { await api('POST', '/api/admin/final/close'); toast('Đã đóng câu hỏi'); loadQuestions(); }
+async function judge(correct) {
+  try { await api('POST', '/api/admin/final/judge', { correct }); toast(correct ? 'Đã cộng điểm' : 'Đã trừ điểm'); loadTeams(); loadQuestions(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+function renderLiveState(state) {
+  const box = document.getElementById('liveState');
+  if (!state.question) { box.textContent = 'Chưa mở câu hỏi nào.'; return; }
+  const phaseTxt = { question_open: '🟢 Chuông đang mở', buzzed: '🔒 Đã có đội bấm chuông', idle: 'Chờ', reveal: 'Đang xem đáp án', wrong_cooldown: '⏳ Sai — đang tự mở lại chuông...' }[state.phase] || state.phase;
+  box.innerHTML = `<b>${phaseTxt}</b><br>Câu hỏi #${state.question.order_index}: ${escapeHtml(state.question.question_text)}` +
+    (state.winnerTeam ? `<br>Đội bấm: <b style="color:${state.winnerTeam.color}">${escapeHtml(state.winnerTeam.name)}</b>` : '');
+}
+
+async function loadViolations() {
+  const { violations } = await api('GET', '/api/admin/violations');
+  document.getElementById('violationsBody').innerHTML = violations.map(v => `
+    <tr>
+      <td>${fmtDateTime(v.created_at)}</td>
+      <td>${escapeHtml(v.team_name)}</td>
+      <td><span class="badge negative">${escapeHtml(v.type)}</span></td>
+      <td>${escapeHtml(v.detail||'')}</td>
+    </tr>
+  `).join('');
+  document.getElementById('violationsEmpty').style.display = violations.length ? 'none' : 'block';
+}
+
+/* ===================== REALTIME ===================== */
+socket.on('score:update', () => { loadTeams(); loadScoreHistory(); });
+socket.on('redemption:new', () => loadRedemptions());
+socket.on('redemption:update', () => { loadRedemptions(); loadTeams(); });
+socket.on('map:update', () => { loadMapSettings(); loadTeamSchedule(); });
+socket.on('final:state', renderLiveState);
+socket.on('final:violation', (v) => {
+  toast(`⚠️ ${v.team_name} vi phạm: ${v.type}`, 'error');
+  loadViolations();
+});
+
+/* ===================== INIT ===================== */
+async function initAll() {
+  await loadTeams();
+  await loadMapSettings();
+  await loadGifts();
+  await loadRedemptions();
+  await loadQuestions();
+  await loadScoreHistory();
+  await loadViolations();
+}
+initAll();
+</script>
+</body>
+</html>

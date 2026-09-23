@@ -1,0 +1,20 @@
+{
+  "name": "teambuilding-fit",
+  "version": "1.0.0",
+  "description": "Website ho tro su kien teambuilding: ban do, diem so, doi qua, va vong chung ket kieu Olympia",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/init.js --reseed"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0 <23.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "socket.io": "^4.7.5"
+  }
+}

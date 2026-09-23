@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Teambuilding FIT — Đội chơi</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="center-screen">
+  <div style="width: 100%; max-width: 420px;">
+    <div class="brand"><span class="dot"></span> Teambuilding FIT</div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Đăng nhập</h3>
+      <form id="teamForm">
+        <label>Mã đội</label>
+        <input type="text" id="teamCode" placeholder="liên hệ trưởng ban careteam" autocomplete="username" required autofocus>
+        <label>Mật khẩu</label>
+        <input type="password" id="teamPassword" placeholder="••••••" autocomplete="current-password" required>
+        <div class="error-msg" id="teamError"></div>
+        <button type="submit" class="btn block">Đăng nhập</button>
+      </form>
+    </div>
+    <p class="small-note" style="text-align:center; margin-top:28px;">
+      <a href="/admin/">Đừng click vào đây nhé các đội</a>
+    </p>
+  </div>
+</div>
+
+<script src="/js/common.js"></script>
+<script>
+// Anh nen trang dang nhap (neu ban to chuc da luu file public/img/login-background.<duoi anh>)
+fetch('/api/public/login-background').then(r => r.json()).then(({ background_image }) => {
+  if (!background_image) return;
+  document.body.style.backgroundImage = `linear-gradient(rgba(10,13,22,.72), rgba(10,13,22,.82)), url(${background_image})`;
+  document.body.style.backgroundSize = 'cover';
+  document.body.style.backgroundPosition = 'center';
+  document.body.style.backgroundAttachment = 'fixed';
+}).catch(() => {});
+
+document.getElementById('teamForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const code = document.getElementById('teamCode').value.trim();
+  const password = document.getElementById('teamPassword').value;
+  const errEl = document.getElementById('teamError');
+  errEl.textContent = '';
+  try {
+    await api('POST', '/api/auth/team/login', { code, password });
+    window.location.href = '/team.html';
+  } catch (err) { errEl.textContent = err.message; }
+});
+</script>
+</body>
+</html>
