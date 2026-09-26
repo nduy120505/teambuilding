@@ -57,4 +57,32 @@ router.get('/admin/me', (req, res) => {
   res.json({ admin: { username: req.session.adminUsername } });
 });
 
+// ---- Dang nhap quan tro (phu trach 1 tro, tu cong diem cho tro do) ----
+router.post('/gamemaster/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Thiếu tài khoản hoặc mật khẩu' });
+
+  const gm = db.prepare('SELECT * FROM game_masters WHERE username = ?').get(username.trim());
+  if (!gm || !bcrypt.compareSync(password, gm.password_hash)) {
+    return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng' });
+  }
+
+  req.session.gameMasterId = gm.id;
+  req.session.gameMasterUsername = gm.username;
+  req.session.gameMasterGame = gm.assigned_game;
+  res.json({ ok: true, gameMaster: { username: gm.username, display_name: gm.display_name, assigned_game: gm.assigned_game } });
+});
+
+router.post('/gamemaster/logout', (req, res) => {
+  req.session.gameMasterId = null;
+  req.session.gameMasterUsername = null;
+  req.session.gameMasterGame = null;
+  res.json({ ok: true });
+});
+
+router.get('/gamemaster/me', (req, res) => {
+  if (!req.session.gameMasterId) return res.status(401).json({ error: 'Chưa đăng nhập' });
+  res.json({ gameMaster: { username: req.session.gameMasterUsername, assigned_game: req.session.gameMasterGame } });
+});
+
 module.exports = router;

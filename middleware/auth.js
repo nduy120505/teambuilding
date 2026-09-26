@@ -8,4 +8,9 @@ function requireAdmin(req, res, next) {
   return res.status(401).json({ error: 'Chưa đăng nhập quản trị' });
 }
 
-module.exports = { requireTeam, requireAdmin };
+function requireGameMaster(req, res, next) {
+  if (req.session && req.session.gameMasterId) return next();
+  return res.status(401).json({ error: 'Chưa đăng nhập quản trò' });
+}
+
+module.exports = { requireTeam, requireAdmin, requireGameMaster };

@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quản trò · Teambuilding FIT</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand" style="font-size:1.05rem;"><span class="dot"></span> Quản trò — <span id="gmGameLabel">…</span></div>
+  <button class="btn secondary sm" id="logoutBtn">Đăng xuất</button>
+</div>
+
+<div class="container">
+  <div class="section-title" style="margin-top:0;">Nhập kết quả &amp; cộng điểm</div>
+  <div class="card">
+    <p class="small-note" id="gmHint" style="margin-top:-4px;"></p>
+    <div id="scoringForm">Đang tải...</div>
+    <button class="btn block" style="margin-top:14px;" onclick="submitScoring()">Tính &amp; áp dụng điểm</button>
+  </div>
+
+  <div class="section-title">Lịch sử chấm điểm của bạn</div>
+  <div class="card">
+    <table>
+      <thead><tr><th>Thời gian</th><th>Đội</th><th>Lý do</th><th style="text-align:right;">Điểm</th></tr></thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+    <div class="empty-hint" id="historyEmpty" style="display:none;">Chưa có lượt chấm điểm nào.</div>
+  </div>
+</div>
+
+<script src="/js/common.js"></script>
+<script>
+document.getElementById('logoutBtn').onclick = async () => {
+  await api('POST', '/api/auth/gamemaster/logout');
+  window.location.href = '/gamemaster/';
+};
+
+// Cau hinh form nhap lieu cho tung tro - GIONG HET logic o public/admin/dashboard.html
+// (va utils/scoring.js ben server) de xem truoc diem dung nhu khi ap dung that.
+const SCORING_GAMES = {
+  khoi_dong: {
+    mode: 'single',
+    fieldLabel: 'Đội về nhất',
+  },
+  pha_vong_doat_bau: {
+    mode: 'per_team',
+    fields: [
+      { key: 'rounds_won', label: 'Số lượt thắng (0-3)', type: 'number', min: 0, max: 3, step: 1, default: 0 },
+      { key: 'violations', label: 'Số lần phạm luật (số đẩy)', type: 'number', min: 0, step: 1, default: 0 },
+    ],
+    compute: (v) => {
+      const ROUND_POINTS = { 0: 0, 1: 5, 2: 10, 3: 15 };
+      const rw = Math.max(0, Math.min(3, Math.round(Number(v.rounds_won) || 0)));
+      const vio = Math.max(0, Math.round(Number(v.violations) || 0));
+      return (ROUND_POINTS[rw] || 0) - vio * 3;
+    },
+  },
+  ra_dau_bat_chu: {
+    mode: 'per_team',
+    fields: [{ key: 'correct_guesses', label: 'Số lần đoán đúng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.correct_guesses) || 0)) * 2,
+  },
+  mach_than_duoc: {
+    mode: 'per_team',
+    fields: [{ key: 'balloons', label: 'Số bóng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.balloons) || 0)) * 3,
+  },
+  noi_vong_tay_lon: {
+    mode: 'ranking',
+    fields: [{ key: 'time_seconds', label: 'Thời gian (giây)', type: 'number', min: 0, step: 0.1 }],
+  },
+  cau_hoi_doi_gio: {
+    mode: 'per_team',
+    fields: [{ key: 'correct_answers', label: 'Số câu trả lời đúng', type: 'number', min: 0, step: 1, default: 0 }],
+    compute: (v) => Math.max(0, Math.round(Number(v.correct_answers) || 0)) * 2,
+  },
+};
+
+let MY_GAME = null;
+let MY_GAME_LABEL = '';
+let TEAMS = [];
+
+function renderScoringForm() {
+  const cfg = SCORING_GAMES[MY_GAME];
+  const box = document.getElementById('scoringForm');
+  if (!cfg) { box.innerHTML = '<p class="empty-hint">Tài khoản chưa được gán trò nào.</p>'; return; }
+
+  if (cfg.mode === 'single') {
+    box.innerHTML = `
+      <label>${cfg.fieldLabel}</label>
+      <select id="sg_single_team">
+        ${TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('') || '<option value="">Chưa có đội</option>'}
+      </select>
+      <p class="small-note">Đội được chọn sẽ được cộng <b>+5 điểm</b>.</p>
+    `;
+    return;
+  }
+
+  box.innerHTML = `
+    <table>
+      <thead><tr><th>Đội</th>${cfg.fields.map(f => `<th>${escapeHtml(f.label)}</th>`).join('')}<th style="text-align:right;">Điểm dự kiến</th></tr></thead>
+      <tbody>
+        ${TEAMS.map(t => `
+          <tr>
+            <td>${escapeHtml(t.name)}</td>
+            ${cfg.fields.map(f => `<td><input class="sg-field" data-team="${t.id}" data-field="${f.key}" type="${f.type}"
+              ${f.min !== undefined ? `min="${f.min}"` : ''} ${f.max !== undefined ? `max="${f.max}"` : ''} ${f.step !== undefined ? `step="${f.step}"` : ''}
+              value="${f.default !== undefined ? f.default : ''}" style="width:100px;" oninput="recomputeScoringPreview()"></td>`).join('')}
+            <td style="text-align:right;"><b id="sg-preview-${t.id}">-</b></td>
+          </tr>
+        `).join('') || `<tr><td colspan="${cfg.fields.length + 2}" class="empty-hint">Chưa có đội nào.</td></tr>`}
+      </tbody>
+    </table>
+  `;
+  recomputeScoringPreview();
+}
+
+function collectScoringEntries() {
+  const cfg = SCORING_GAMES[MY_GAME];
+  if (!cfg) return { cfg, entries: [] };
+
+  if (cfg.mode === 'single') {
+    const teamId = Number(document.getElementById('sg_single_team')?.value);
+    return { cfg, entries: teamId ? [{ team_id: teamId }] : [] };
+  }
+
+  const byTeam = {};
+  document.querySelectorAll('.sg-field').forEach(el => {
+    const teamId = Number(el.dataset.team);
+    if (!byTeam[teamId]) byTeam[teamId] = { team_id: teamId };
+    byTeam[teamId][el.dataset.field] = el.value;
+  });
+  return { cfg, entries: Object.values(byTeam) };
+}
+
+function recomputeScoringPreview() {
+  const { cfg, entries } = collectScoringEntries();
+  if (!cfg || cfg.mode === 'single') return;
+
+  if (cfg.mode === 'ranking') {
+    const RANK_POINTS = [12, 9, 6, 3, 0];
+    const withTimes = entries
+      .map(e => ({ team_id: e.team_id, time_seconds: Number(e.time_seconds) }))
+      .filter(e => Number.isFinite(e.time_seconds) && e.time_seconds > 0)
+      .sort((a, b) => a.time_seconds - b.time_seconds);
+    TEAMS.forEach(t => {
+      const idx = withTimes.findIndex(e => e.team_id === t.id);
+      const elx = document.getElementById(`sg-preview-${t.id}`);
+      if (!elx) return;
+      elx.textContent = idx >= 0 ? `+${RANK_POINTS[idx] ?? 0} (hạng ${idx + 1})` : '-';
+    });
+    return;
+  }
+
+  entries.forEach(e => {
+    const pts = cfg.compute(e);
+    const elx = document.getElementById(`sg-preview-${e.team_id}`);
+    if (elx) elx.textContent = (pts >= 0 ? '+' : '') + pts;
+  });
+}
+
+async function submitScoring() {
+  const { cfg, entries } = collectScoringEntries();
+  if (!cfg) return;
+
+  let payloadEntries = entries;
+  if (cfg.mode === 'ranking') {
+    payloadEntries = entries.filter(e => e.time_seconds !== undefined && e.time_seconds !== '');
+  }
+  if (!payloadEntries.length) return toast('Chưa nhập dữ liệu để tính điểm', 'error');
+
+  try {
+    const { results } = await api('POST', '/api/gamemaster/score', { entries: payloadEntries });
+    toast(`Đã áp dụng điểm cho ${results.length} đội`);
+    loadHistory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function loadHistory() {
+  const { history } = await api('GET', '/api/gamemaster/history');
+  document.getElementById('historyBody').innerHTML = history.map(h => `
+    <tr>
+      <td>${fmtDateTime(h.created_at)}</td>
+      <td>${escapeHtml(h.team_name)}</td>
+      <td>${escapeHtml(h.reason || '')}</td>
+      <td style="text-align:right;"><span class="badge ${h.delta >= 0 ? 'positive' : 'negative'}">${h.delta >= 0 ? '+' : ''}${h.delta}</span></td>
+    </tr>
+  `).join('');
+  document.getElementById('historyEmpty').style.display = history.length ? 'none' : 'block';
+}
+
+async function initAll() {
+  try {
+    const { gameMaster } = await api('GET', '/api/gamemaster/me');
+    MY_GAME = gameMaster.assigned_game;
+    MY_GAME_LABEL = gameMaster.assigned_game_label;
+    document.getElementById('gmGameLabel').textContent = MY_GAME_LABEL;
+    document.getElementById('gmHint').textContent = `Bạn đang phụ trách chấm điểm cho trò: ${MY_GAME_LABEL}`;
+  } catch (e) {
+    window.location.href = '/gamemaster/';
+    return;
+  }
+
+  const { teams } = await api('GET', '/api/gamemaster/teams');
+  TEAMS = teams;
+  renderScoringForm();
+  loadHistory();
+}
+
+initAll();
+</script>
+</body>
+</html>

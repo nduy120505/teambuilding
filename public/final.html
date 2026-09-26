@@ -21,13 +21,20 @@
     width: 220px; height: 220px; border-radius: 50%; border: none; cursor: pointer;
     background: radial-gradient(circle at 35% 30%, #ff6b6b, #c0392b);
     box-shadow: 0 12px 0 #8e2a20, 0 16px 30px rgba(0,0,0,.5);
-    color: white; font-size: 1.6rem; font-weight: 800; letter-spacing: .05em;
-    transition: transform .05s;
+    color: white; transition: transform .05s;
+    display: flex; align-items: center; justify-content: center;
   }
+  /* Nut chuong CHI hien icon hinh chuong (khong con chu) - trang thai the hien qua mau/animation/phaseLabel ben tren */
+  .buzzer-btn .bell-icon { font-size: 5rem; line-height: 1; filter: drop-shadow(0 2px 4px rgba(0,0,0,.35)); }
   .buzzer-btn:active { transform: translateY(10px); box-shadow: 0 2px 0 #8e2a20, 0 6px 14px rgba(0,0,0,.5); }
   .buzzer-btn:disabled { background: radial-gradient(circle at 35% 30%, #5a6178, #333c52); box-shadow: 0 12px 0 #262c40, 0 16px 30px rgba(0,0,0,.3); cursor: not-allowed; }
   .buzzer-btn.ready { animation: buzzGlow 1s infinite alternate; }
   @keyframes buzzGlow { from { box-shadow: 0 12px 0 #8e2a20, 0 0 20px 4px rgba(255,107,107,.4); } to { box-shadow: 0 12px 0 #8e2a20, 0 0 46px 14px rgba(255,107,107,.85); } }
+
+  /* Anh nen trang (dung chung anh nen trang dang nhap, cau hinh o public/img/login-background.<duoi anh>) */
+  body.has-bg-image { background-size: cover; background-position: center; background-attachment: fixed; }
+  body.has-bg-image .final-top,
+  body.has-bg-image #questionCard { backdrop-filter: blur(2px); background: rgba(28, 36, 54, .82); }
 
   #winnerBanner { font-size: 1.3rem; font-weight: 800; padding: 14px 26px; border-radius: 14px; }
 
@@ -78,7 +85,7 @@
 
   <div id="winnerBanner" style="display:none;"></div>
 
-  <button class="buzzer-btn" id="buzzerBtn" disabled>BẤM CHUÔNG</button>
+  <button class="buzzer-btn" id="buzzerBtn" disabled><span class="bell-icon">🔔</span></button>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -98,6 +105,13 @@ async function init() {
   document.getElementById('teamSwatch').style.background = me.color;
 }
 init();
+
+// Anh nen trang (dung chung anh nen trang dang nhap, xem public/img/login-background.<duoi anh>)
+fetch('/api/public/login-background').then(r => r.json()).then(({ background_image }) => {
+  if (!background_image) return;
+  document.body.style.backgroundImage = `linear-gradient(rgba(10,13,22,.55), rgba(10,13,22,.68)), url(${background_image})`;
+  document.body.classList.add('has-bg-image');
+}).catch(() => {});
 
 document.getElementById('startBtn').onclick = async () => {
   try { await document.documentElement.requestFullscreen(); } catch (e) { /* mot so trinh duyet co the tu choi, van cho tiep tuc */ }
@@ -162,7 +176,6 @@ function render(state) {
     winnerBanner.style.display = 'none';
     buzzerBtn.disabled = true;
     buzzerBtn.classList.remove('ready');
-    buzzerBtn.textContent = 'BẤM CHUÔNG';
     return;
   }
 
@@ -175,13 +188,11 @@ function render(state) {
     winnerBanner.style.display = 'none';
     buzzerBtn.disabled = false;
     buzzerBtn.classList.add('ready');
-    buzzerBtn.textContent = 'BẤM CHUÔNG';
   } else if (state.phase === 'buzzed') {
     buzzerBtn.disabled = true;
     buzzerBtn.classList.remove('ready');
     const isMe = state.winnerTeam && me && state.winnerTeam.id === me.id;
     phaseLabel.textContent = isMe ? '🎉 Bạn đã giành quyền trả lời!' : '🔒 Đã có đội giành quyền trả lời';
-    buzzerBtn.textContent = isMe ? 'BẠN ĐÃ BẤM!' : 'ĐÃ KHOÁ';
     winnerBanner.style.display = 'block';
     winnerBanner.style.background = state.winnerTeam ? state.winnerTeam.color + '33' : '';
     winnerBanner.style.color = state.winnerTeam ? state.winnerTeam.color : '';
@@ -190,7 +201,6 @@ function render(state) {
     phaseLabel.textContent = '❌ Trả lời sai — chuông sẽ mở lại sau giây lát cho các đội khác...';
     buzzerBtn.disabled = true;
     buzzerBtn.classList.remove('ready');
-    buzzerBtn.textContent = 'CHỜ MỞ LẠI...';
     winnerBanner.style.display = 'none';
   } else {
     phaseLabel.textContent = 'Đang chờ ban tổ chức...';

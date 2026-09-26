@@ -11,6 +11,17 @@ function migrate() {
     display_name TEXT DEFAULT 'Ban to chuc'
   );
 
+  -- Tai khoan "quan tro": moi tai khoan phu trach DUY NHAT 1 tro (assigned_game, xem
+  -- utils/scoring.js -> GAME_SCORING_RULES). Quan tro tu nhap ket qua/cong diem cho tro
+  -- cua minh, BTC (admin) chi theo doi qua trinh chu khong can tu cong diem nua.
+  CREATE TABLE IF NOT EXISTS game_masters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT DEFAULT 'Quản trò',
+    assigned_game TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,
@@ -180,11 +191,16 @@ function seed() {
   const stageCount = db.prepare('SELECT COUNT(*) c FROM stages').get().c;
   if (stageCount === 0) {
     const insertStage = db.prepare(`INSERT INTO stages (name, description, order_index, x_percent, y_percent, icon, kind, location_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    // 6 tro co dinh cua su kien (dung ten & cong thuc trong utils/scoring.js) + Chung ket.
+    // Tat ca deu la kind='don' (moi doi tu tinh diem doc lap, khong ghep doi thu truc tiep).
     const demoStages = [
-      ['Trò 1', 'Trò chơi đối kháng giữa 2 (hoặc nhiều) đội', 1, 20, 70, 'flag', 'doi_khang', ''],
-      ['Trò 3', 'Trò chơi đối kháng giữa 2 (hoặc nhiều) đội', 2, 45, 40, 'obstacle', 'doi_khang', ''],
-      ['Trò 4', 'Trò chơi đơn, mỗi đội thi độc lập', 3, 70, 65, 'puzzle', 'don', ''],
-      ['Chung kết', 'Vòng chung kết — Đường lên đỉnh Olympia', 4, 90, 35, 'trophy', 'chung_ket', ''],
+      ['Trò khởi động', 'Đội về nhất được cộng điểm', 1, 12, 75, 'flag', 'don', ''],
+      ['Phá vòng đoạt báu', 'Tính điểm theo số lượt thắng, trừ điểm nếu phạm luật', 2, 30, 55, 'star', 'don', ''],
+      ['Ra Dấu Bắt Chữ', 'Tính điểm theo số lần đoán đúng', 3, 48, 35, 'puzzle', 'don', ''],
+      ['Mạch Thần Dược', 'Tính điểm theo số bóng', 4, 62, 60, 'custom', 'don', ''],
+      ['Nối vòng tay lớn', 'Xếp hạng theo thời gian hoàn thành', 5, 78, 40, 'obstacle', 'don', ''],
+      ['Câu hỏi đợi giờ', 'Tính điểm theo số câu trả lời đúng', 6, 88, 70, 'note', 'don', ''],
+      ['Chung kết', 'Vòng chung kết — Đường lên đỉnh Olympia', 7, 95, 20, 'trophy', 'chung_ket', ''],
     ];
     for (const s of demoStages) insertStage.run(...s);
   }
@@ -222,6 +238,7 @@ function reseedIfRequested() {
       DELETE FROM score_history;
       DELETE FROM teams;
       DELETE FROM admins;
+      DELETE FROM game_masters;
     `);
     db.prepare(`INSERT OR IGNORE INTO final_state (id, phase) VALUES (1, 'idle')`).run();
   }

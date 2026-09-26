@@ -10,6 +10,7 @@ require('./db/init'); // dam bao schema + seed da san sang
 const authRoutes = require('./routes/auth');
 const teamRoutes = require('./routes/team');
 const adminRoutes = require('./routes/admin');
+const gamemasterRoutes = require('./routes/gamemaster');
 const { resolveLoginBackground } = require('./utils/mapBackground');
 
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,7 @@ io.engine.use(sessionMiddleware);
 app.use('/api/auth', authRoutes);
 app.use('/api/team', teamRoutes(io));
 app.use('/api/admin', adminRoutes(io));
+app.use('/api/gamemaster', gamemasterRoutes(io));
 
 // Anh nen trang dang nhap (khong can dang nhap de xem) - dat file public/img/login-background.<duoi anh>
 app.get('/api/public/login-background', (req, res) => {
@@ -48,6 +50,9 @@ io.on('connection', (socket) => {
 
   if (sess && sess.isAdmin) {
     socket.join('admins');
+  }
+  if (sess && sess.gameMasterId) {
+    socket.join('gamemasters');
   }
   if (sess && sess.teamId) {
     socket.join(`team-${sess.teamId}`);

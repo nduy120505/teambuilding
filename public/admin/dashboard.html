@@ -26,6 +26,7 @@
     <button class="tab-btn" data-tab="map">🗺️ Bản đồ</button>
     <button class="tab-btn" data-tab="gifts">🎁 Đổi thưởng</button>
     <button class="tab-btn" data-tab="final">🔔 Ai thông minh hơn sinh viên năm nhất</button>
+    <button class="tab-btn" data-tab="gamemasters">🎮 Quản trò</button>
   </div>
 
   <!-- ===================== TEAMS ===================== -->
@@ -164,6 +165,21 @@
         <tbody id="violationsBody"></tbody>
       </table>
       <div class="empty-hint" id="violationsEmpty" style="display:none;">Chưa có vi phạm nào.</div>
+    </div>
+  </div>
+
+  <!-- ===================== QUẢN TRÒ ===================== -->
+  <div id="tab-gamemasters" class="tab-panel" style="display:none;">
+    <p class="small-note">Mỗi quản trò phụ trách chấm điểm cho đúng 1 trò chơi. BTC chỉ cần theo dõi (tab Bảng xếp hạng), không cần tự cộng điểm.</p>
+    <div class="flex-between">
+      <div class="section-title" style="margin:0;">Tài khoản quản trò</div>
+      <button class="btn sm" onclick="openGameMasterModal()">+ Thêm quản trò</button>
+    </div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Tài khoản</th><th>Tên hiển thị</th><th>Trò phụ trách</th><th>Thao tác</th></tr></thead>
+        <tbody id="gameMastersBody"></tbody>
+      </table>
     </div>
   </div>
 </div>
@@ -812,6 +828,72 @@ async function loadViolations() {
   document.getElementById('violationsEmpty').style.display = violations.length ? 'none' : 'block';
 }
 
+/* ===================== TÀI KHOẢN QUẢN TRÒ ===================== */
+let GAME_MASTERS = [];
+let SCORING_GAMES_LIST = [];
+
+async function loadGameMasters() {
+  const { gameMasters, games } = await api('GET', '/api/admin/game-masters');
+  GAME_MASTERS = gameMasters;
+  SCORING_GAMES_LIST = games;
+  const gameLabel = (key) => games.find(g => g.key === key)?.label || key;
+  document.getElementById('gameMastersBody').innerHTML = gameMasters.map(gm => `
+    <tr>
+      <td><b>${escapeHtml(gm.username)}</b></td>
+      <td>${escapeHtml(gm.display_name || '-')}</td>
+      <td>${escapeHtml(gameLabel(gm.assigned_game))}</td>
+      <td class="row-actions">
+        <button class="btn secondary sm" onclick="openGameMasterModal(${gm.id})">Sửa</button>
+        <button class="btn danger sm" onclick="deleteGameMaster(${gm.id})">Xoá</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có tài khoản quản trò nào.</td></tr>';
+}
+
+function openGameMasterModal(id) {
+  const gm = id ? GAME_MASTERS.find(x => x.id === id) : null;
+  const gamesOptions = SCORING_GAMES_LIST.map(g => `<option value="${g.key}" ${gm && gm.assigned_game === g.key ? 'selected' : ''}>${escapeHtml(g.label)}</option>`).join('');
+  showModal(`
+    <h3 style="margin-top:0;">${gm ? 'Sửa quản trò' : 'Thêm quản trò'}</h3>
+    <label>Tài khoản đăng nhập</label>
+    <input id="gmUsername" value="${gm ? escapeHtml(gm.username) : ''}" ${gm ? 'disabled' : ''} placeholder="VD: qt_khoidong">
+    <label>Tên hiển thị</label>
+    <input id="gmDisplayName" value="${gm ? escapeHtml(gm.display_name || '') : ''}" placeholder="VD: Anh Tuấn - Trò khởi động">
+    <label>Trò phụ trách</label>
+    <select id="gmAssignedGame">${gamesOptions}</select>
+    <label>${gm ? 'Đổi mật khẩu (để trống nếu giữ nguyên)' : 'Mật khẩu'}</label>
+    <input id="gmPassword" type="text" placeholder="Mật khẩu đăng nhập">
+    <div class="row-actions">
+      <button class="btn" onclick="saveGameMaster(${id || 'null'})">Lưu</button>
+      <button class="btn secondary" onclick="closeModal()">Huỷ</button>
+    </div>
+  `);
+}
+
+async function saveGameMaster(id) {
+  const display_name = document.getElementById('gmDisplayName').value.trim();
+  const assigned_game = document.getElementById('gmAssignedGame').value;
+  const password = document.getElementById('gmPassword').value;
+  try {
+    if (id) {
+      await api('PUT', `/api/admin/game-masters/${id}`, { display_name, assigned_game, password: password || undefined });
+    } else {
+      const username = document.getElementById('gmUsername').value.trim();
+      if (!username || !password) return toast('Cần nhập tài khoản và mật khẩu', 'error');
+      await api('POST', '/api/admin/game-masters', { username, display_name, assigned_game, password });
+    }
+    closeModal(); toast('Đã lưu tài khoản quản trò'); loadGameMasters();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteGameMaster(id) {
+  if (!confirm('Xoá tài khoản quản trò này?')) return;
+  try {
+    await api('DELETE', `/api/admin/game-masters/${id}`);
+    toast('Đã xoá tài khoản quản trò'); loadGameMasters();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 /* ===================== REALTIME ===================== */
 socket.on('score:update', () => { loadTeams(); loadScoreHistory(); });
 socket.on('redemption:new', () => loadRedemptions());
@@ -832,6 +914,7 @@ async function initAll() {
   await loadQuestions();
   await loadScoreHistory();
   await loadViolations();
+  await loadGameMasters();
 }
 initAll();
 </script>

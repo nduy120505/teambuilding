@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db/database');
 const { requireAdmin } = require('../middleware/auth');
+const { GAME_SCORING_RULES, computeGameScoring, applyGameScoring } = require('../utils/scoring');
 
 module.exports = function (io) {
   const router = express.Router();
@@ -50,6 +51,47 @@ module.exports = function (io) {
     res.json({ ok: true });
   });
 
+  // Da bo tinh nang "Tai khoan BTC" (chi con dung 1 tai khoan admin duy nhat, khong can
+  // them/sua/xoa tai khoan admin phu nua) - theo yeu cau user. Bang `admins` van giu nguyen
+  // trong schema (van dang dung de dang nhap), chi bo route quan ly nhieu tai khoan.
+
+  // ================= TAI KHOAN QUAN TRO (moi tai khoan phu trach 1 tro, tu cham diem tro do) =================
+  router.get('/game-masters', (req, res) => {
+    const gameMasters = db.prepare('SELECT id, username, display_name, assigned_game FROM game_masters ORDER BY id ASC').all();
+    res.json({ gameMasters, games: Object.entries(GAME_SCORING_RULES).map(([key, v]) => ({ key, label: v.label })) });
+  });
+
+  router.post('/game-masters', (req, res) => {
+    const { username, display_name, password, assigned_game } = req.body || {};
+    if (!username || !password || !assigned_game) return res.status(400).json({ error: 'Thiếu tài khoản / mật khẩu / trò phụ trách' });
+    if (!GAME_SCORING_RULES[assigned_game]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
+    const hash = bcrypt.hashSync(password, 10);
+    try {
+      const info = db.prepare('INSERT INTO game_masters (username, password_hash, display_name, assigned_game) VALUES (?, ?, ?, ?)')
+        .run(username.trim(), hash, (display_name || '').trim() || 'Quản trò', assigned_game);
+      res.json({ ok: true, id: info.lastInsertRowid });
+    } catch (e) {
+      res.status(400).json({ error: 'Tài khoản đã tồn tại' });
+    }
+  });
+
+  router.put('/game-masters/:id', (req, res) => {
+    const id = Number(req.params.id);
+    const { display_name, password, assigned_game } = req.body || {};
+    if (assigned_game !== undefined) {
+      if (!GAME_SCORING_RULES[assigned_game]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
+      db.prepare('UPDATE game_masters SET assigned_game = ? WHERE id = ?').run(assigned_game, id);
+    }
+    if (display_name !== undefined) db.prepare('UPDATE game_masters SET display_name = ? WHERE id = ?').run(display_name.trim(), id);
+    if (password) db.prepare('UPDATE game_masters SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), id);
+    res.json({ ok: true });
+  });
+
+  router.delete('/game-masters/:id', (req, res) => {
+    db.prepare('DELETE FROM game_masters WHERE id = ?').run(Number(req.params.id));
+    res.json({ ok: true });
+  });
+
   // ================= SCORES =================
   router.post('/teams/:id/score', (req, res) => {
     const teamId = Number(req.params.id);
@@ -85,106 +127,20 @@ module.exports = function (io) {
   });
 
   // ================= TÍNH ĐIỂM TỰ ĐỘNG THEO TRÒ =================
-  // Cong thuc diem cho tung tro co dinh cua su kien - BTC chi nhap so lieu tho (so luot thang,
-  // so lan doan dung, thoi gian...), server tinh diem va cong don thang vao total_points +
-  // score_history (giong nhu thao tac +-Diem thu cong, nhung tu dong tinh dung cong thuc).
-  const GAME_SCORING_RULES = {
-    khoi_dong: { label: 'Trò khởi động' },
-    pha_vong_doat_bau: { label: 'Phá vòng đoạt báu' },
-    ra_dau_bat_chu: { label: 'Ra Dấu Bắt Chữ' },
-    mach_than_duoc: { label: 'Mạch Thần Dược' },
-    noi_vong_tay_lon: { label: 'Nối vòng tay lớn' },
-    cau_hoi_doi_gio: { label: 'Câu hỏi đợi giờ' },
-  };
-
+  // Cong thuc diem cho tung tro co dinh cua su kien - BTC (hoac quan tro, xem routes/gamemaster.js)
+  // chi nhap so lieu tho (so luot thang, so lan doan dung, thoi gian...), server tinh diem va cong
+  // don thang vao total_points + score_history. Logic tinh diem dung chung o utils/scoring.js.
   router.get('/scoring/games', (req, res) => {
     res.json({ games: Object.entries(GAME_SCORING_RULES).map(([key, v]) => ({ key, label: v.label })) });
   });
 
   router.post('/scoring/:game', (req, res) => {
     const game = req.params.game;
-    const rule = GAME_SCORING_RULES[game];
-    if (!rule) return res.status(400).json({ error: 'Trò không hợp lệ' });
     const entries = Array.isArray((req.body || {}).entries) ? req.body.entries : [];
-    if (!entries.length) return res.status(400).json({ error: 'Thiếu dữ liệu đội' });
+    const { results, rule, error } = computeGameScoring(game, entries);
+    if (error) return res.status(400).json({ error });
 
-    let results = []; // { team_id, delta, reason }
-
-    if (game === 'khoi_dong') {
-      // Chi 1 doi ve nhat, +5 diem. entries: [{ team_id }]
-      const teamId = Number(entries[0].team_id);
-      if (!teamId) return res.status(400).json({ error: 'Thiếu đội về nhất' });
-      results.push({ team_id: teamId, delta: 5, reason: 'Trò khởi động: về nhất' });
-    } else if (game === 'pha_vong_doat_bau') {
-      // 3/3 luot = 15d, 2/3 = 10d, 1/3 = 5d, 0/3 = 0d. Tru 3d/lan pham luat (xo day...).
-      const ROUND_POINTS = { 0: 0, 1: 5, 2: 10, 3: 15 };
-      for (const e of entries) {
-        const teamId = Number(e.team_id);
-        if (!teamId) continue;
-        const roundsWon = Math.max(0, Math.min(3, Math.round(Number(e.rounds_won) || 0)));
-        const violations = Math.max(0, Math.round(Number(e.violations) || 0));
-        const delta = (ROUND_POINTS[roundsWon] ?? 0) - violations * 3;
-        let reason = `Phá vòng đoạt báu: thắng ${roundsWon}/3 lượt`;
-        if (violations > 0) reason += `, phạm luật ${violations} lần (-${violations * 3}đ)`;
-        results.push({ team_id: teamId, delta, reason });
-      }
-    } else if (game === 'ra_dau_bat_chu') {
-      // 2 diem / lan doan dung
-      for (const e of entries) {
-        const teamId = Number(e.team_id);
-        if (!teamId) continue;
-        const n = Math.max(0, Math.round(Number(e.correct_guesses) || 0));
-        results.push({ team_id: teamId, delta: n * 2, reason: `Ra Dấu Bắt Chữ: đoán đúng ${n} lần` });
-      }
-    } else if (game === 'mach_than_duoc') {
-      // 3 diem / qua bong
-      for (const e of entries) {
-        const teamId = Number(e.team_id);
-        if (!teamId) continue;
-        const n = Math.max(0, Math.round(Number(e.balloons) || 0));
-        results.push({ team_id: teamId, delta: n * 3, reason: `Mạch Thần Dược: ${n} quả bóng` });
-      }
-    } else if (game === 'noi_vong_tay_lon') {
-      // Xep hang theo thoi gian (nho nhat = nhanh nhat = hang 1). Diem: nhat +12, nhi +9, ba +6, tu +3, bet +0.
-      const RANK_POINTS = [12, 9, 6, 3, 0];
-      const withTimes = entries
-        .map(e => ({ team_id: Number(e.team_id), time_seconds: Number(e.time_seconds) }))
-        .filter(e => e.team_id && Number.isFinite(e.time_seconds) && e.time_seconds > 0)
-        .sort((a, b) => a.time_seconds - b.time_seconds);
-      withTimes.forEach((e, idx) => {
-        const delta = RANK_POINTS[idx] ?? 0;
-        results.push({ team_id: e.team_id, delta, reason: `Nối vòng tay lớn: hạng ${idx + 1} (${e.time_seconds}s)` });
-      });
-    } else if (game === 'cau_hoi_doi_gio') {
-      // 2 diem / cau tra loi dung
-      for (const e of entries) {
-        const teamId = Number(e.team_id);
-        if (!teamId) continue;
-        const n = Math.max(0, Math.round(Number(e.correct_answers) || 0));
-        results.push({ team_id: teamId, delta: n * 2, reason: `Câu hỏi đợi giờ: trả lời đúng ${n} câu` });
-      }
-    }
-
-    if (!results.length) return res.status(400).json({ error: 'Không có đội nào hợp lệ để tính điểm' });
-
-    for (const r of results) {
-      db.prepare('UPDATE teams SET total_points = total_points + ? WHERE id = ?').run(r.delta, r.team_id);
-      db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
-                  VALUES (?, ?, ?, ?, ?)`).run(r.team_id, r.delta, r.reason, rule.label, req.session.adminUsername);
-    }
-
-    const updatedTeams = db.prepare('SELECT id, total_points FROM teams').all();
-    for (const r of results) {
-      const t = updatedTeams.find(x => x.id === r.team_id);
-      io.to(`team-${r.team_id}`).to('admins').emit('score:update', {
-        team_id: r.team_id,
-        total_points: t ? t.total_points : null,
-        delta: r.delta,
-        reason: r.reason,
-        round_name: rule.label,
-      });
-    }
-
+    applyGameScoring(db, io, results, rule, req.session.adminUsername);
     res.json({ ok: true, results });
   });
 
