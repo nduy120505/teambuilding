@@ -17,6 +17,10 @@
   <div class="section-title" style="margin-top:0;">Nhập kết quả &amp; cộng điểm</div>
   <div class="card">
     <p class="small-note" id="gmHint" style="margin-top:-4px;"></p>
+    <div id="gmGameSelectWrap" style="display:none; margin-bottom:12px;">
+      <label>Chọn trò đang chấm điểm</label>
+      <select id="gmGameSelect" onchange="onGameSelectChange()"></select>
+    </div>
     <div id="scoringForm">Đang tải...</div>
     <button class="btn block" style="margin-top:14px;" onclick="submitScoring()">Tính &amp; áp dụng điểm</button>
   </div>
@@ -79,9 +83,16 @@ const SCORING_GAMES = {
   },
 };
 
-let MY_GAME = null;
-let MY_GAME_LABEL = '';
+let MY_GAMES = []; // [{key, label}] - danh sach tro duoc phan cong, co the nhieu hon 1
+let MY_GAME = null; // tro dang duoc chon de nhap diem trong luot nay
 let TEAMS = [];
+
+function onGameSelectChange() {
+  MY_GAME = document.getElementById('gmGameSelect').value;
+  const found = MY_GAMES.find(g => g.key === MY_GAME);
+  document.getElementById('gmHint').textContent = found ? `Bạn đang chấm điểm cho trò: ${found.label}` : '';
+  renderScoringForm();
+}
 
 function renderScoringForm() {
   const cfg = SCORING_GAMES[MY_GAME];
@@ -173,7 +184,7 @@ async function submitScoring() {
   if (!payloadEntries.length) return toast('Chưa nhập dữ liệu để tính điểm', 'error');
 
   try {
-    const { results } = await api('POST', '/api/gamemaster/score', { entries: payloadEntries });
+    const { results } = await api('POST', '/api/gamemaster/score', { game: MY_GAME, entries: payloadEntries });
     toast(`Đã áp dụng điểm cho ${results.length} đội`);
     loadHistory();
   } catch (e) { toast(e.message, 'error'); }
@@ -195,10 +206,17 @@ async function loadHistory() {
 async function initAll() {
   try {
     const { gameMaster } = await api('GET', '/api/gamemaster/me');
-    MY_GAME = gameMaster.assigned_game;
-    MY_GAME_LABEL = gameMaster.assigned_game_label;
-    document.getElementById('gmGameLabel').textContent = MY_GAME_LABEL;
-    document.getElementById('gmHint').textContent = `Bạn đang phụ trách chấm điểm cho trò: ${MY_GAME_LABEL}`;
+    MY_GAMES = gameMaster.assigned_games || [];
+    MY_GAME = MY_GAMES[0] ? MY_GAMES[0].key : null;
+    document.getElementById('gmGameLabel').textContent = MY_GAMES.map(g => g.label).join(', ') || 'Chưa được gán trò';
+
+    if (MY_GAMES.length > 1) {
+      document.getElementById('gmGameSelectWrap').style.display = 'block';
+      document.getElementById('gmGameSelect').innerHTML = MY_GAMES.map(g => `<option value="${g.key}">${escapeHtml(g.label)}</option>`).join('');
+    }
+    document.getElementById('gmHint').textContent = MY_GAME
+      ? `Bạn đang chấm điểm cho trò: ${MY_GAMES.find(g => g.key === MY_GAME).label}`
+      : 'Tài khoản chưa được gán trò nào.';
   } catch (e) {
     window.location.href = '/gamemaster/';
     return;

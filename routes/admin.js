@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const db = require('../db/database');
 const { requireAdmin } = require('../middleware/auth');
 const { GAME_SCORING_RULES, computeGameScoring, applyGameScoring } = require('../utils/scoring');
+const { STICKER_DEFS, STICKER_BY_KEY } = require('../utils/stickers');
+const { resolveStickerImage } = require('../utils/mapBackground');
 
 module.exports = function (io) {
   const router = express.Router();
@@ -55,20 +57,31 @@ module.exports = function (io) {
   // them/sua/xoa tai khoan admin phu nua) - theo yeu cau user. Bang `admins` van giu nguyen
   // trong schema (van dang dung de dang nhap), chi bo route quan ly nhieu tai khoan.
 
-  // ================= TAI KHOAN QUAN TRO (moi tai khoan phu trach 1 tro, tu cham diem tro do) =================
+  // ================= TAI KHOAN QUAN TRO (1 quan tro co the phu trach NHIEU tro) =================
+  const getAssignedGames = db.prepare('SELECT game_key FROM game_master_assignments WHERE game_master_id = ?');
+  const deleteAssignments = db.prepare('DELETE FROM game_master_assignments WHERE game_master_id = ?');
+  const insertAssignment = db.prepare('INSERT INTO game_master_assignments (game_master_id, game_key) VALUES (?, ?)');
+
   router.get('/game-masters', (req, res) => {
-    const gameMasters = db.prepare('SELECT id, username, display_name, assigned_game FROM game_masters ORDER BY id ASC').all();
+    const gameMasters = db.prepare('SELECT id, username, display_name FROM game_masters ORDER BY id ASC').all()
+      .map(gm => ({ ...gm, assigned_games: getAssignedGames.all(gm.id).map(r => r.game_key) }));
     res.json({ gameMasters, games: Object.entries(GAME_SCORING_RULES).map(([key, v]) => ({ key, label: v.label })) });
   });
 
   router.post('/game-masters', (req, res) => {
-    const { username, display_name, password, assigned_game } = req.body || {};
-    if (!username || !password || !assigned_game) return res.status(400).json({ error: 'Thiếu tài khoản / mật khẩu / trò phụ trách' });
-    if (!GAME_SCORING_RULES[assigned_game]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
+    const { username, display_name, password, assigned_games } = req.body || {};
+    const games = Array.isArray(assigned_games) ? [...new Set(assigned_games)] : [];
+    if (!username || !password || !games.length) return res.status(400).json({ error: 'Thiếu tài khoản / mật khẩu / trò phụ trách' });
+    for (const g of games) {
+      if (!GAME_SCORING_RULES[g]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
+    }
     const hash = bcrypt.hashSync(password, 10);
     try {
+      // Cot assigned_game (cu, 1-tro) chi con giu tro dau tien de tuong thich nguoc, khong con
+      // duoc doc de xac dinh quyen - danh sach that su nam o bang game_master_assignments.
       const info = db.prepare('INSERT INTO game_masters (username, password_hash, display_name, assigned_game) VALUES (?, ?, ?, ?)')
-        .run(username.trim(), hash, (display_name || '').trim() || 'Quản trò', assigned_game);
+        .run(username.trim(), hash, (display_name || '').trim() || 'Quản trò', games[0]);
+      for (const g of games) insertAssignment.run(info.lastInsertRowid, g);
       res.json({ ok: true, id: info.lastInsertRowid });
     } catch (e) {
       res.status(400).json({ error: 'Tài khoản đã tồn tại' });
@@ -77,10 +90,15 @@ module.exports = function (io) {
 
   router.put('/game-masters/:id', (req, res) => {
     const id = Number(req.params.id);
-    const { display_name, password, assigned_game } = req.body || {};
-    if (assigned_game !== undefined) {
-      if (!GAME_SCORING_RULES[assigned_game]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
-      db.prepare('UPDATE game_masters SET assigned_game = ? WHERE id = ?').run(assigned_game, id);
+    const { display_name, password, assigned_games } = req.body || {};
+    if (Array.isArray(assigned_games)) {
+      const games = [...new Set(assigned_games)];
+      for (const g of games) {
+        if (!GAME_SCORING_RULES[g]) return res.status(400).json({ error: 'Trò phụ trách không hợp lệ' });
+      }
+      deleteAssignments.run(id);
+      for (const g of games) insertAssignment.run(id, g);
+      if (games[0]) db.prepare('UPDATE game_masters SET assigned_game = ? WHERE id = ?').run(games[0], id);
     }
     if (display_name !== undefined) db.prepare('UPDATE game_masters SET display_name = ? WHERE id = ?').run(display_name.trim(), id);
     if (password) db.prepare('UPDATE game_masters SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), id);
@@ -88,7 +106,7 @@ module.exports = function (io) {
   });
 
   router.delete('/game-masters/:id', (req, res) => {
-    db.prepare('DELETE FROM game_masters WHERE id = ?').run(Number(req.params.id));
+    db.prepare('DELETE FROM game_masters WHERE id = ?').run(Number(req.params.id)); // ON DELETE CASCADE xoa luon assignments
     res.json({ ok: true });
   });
 
@@ -140,7 +158,7 @@ module.exports = function (io) {
     const { results, rule, error } = computeGameScoring(game, entries);
     if (error) return res.status(400).json({ error });
 
-    applyGameScoring(db, io, results, rule, req.session.adminUsername);
+    applyGameScoring(db, io, results, rule, req.session.adminUsername, game);
     res.json({ ok: true, results });
   });
 
@@ -259,77 +277,122 @@ module.exports = function (io) {
   // file public/img/map-background.<duoi anh> truc tiep tren o dia (xem README). Server tu
   // do quet thu muc public/img/ moi khi co doi xem ban do (routes/team.js -> resolveMapBackground()).
 
-  // ================= GIFTS =================
-  router.get('/gifts', (req, res) => {
-    res.json({ gifts: db.prepare('SELECT * FROM gifts ORDER BY id ASC').all() });
+  // ================= STICKERS (thay the "Doi qua" cu) =================
+  // 4 sticker "quyen nang" co dinh dung o vong chung ket, dinh nghia day du (ten/mo ta/tro
+  // nguon) o utils/stickers.js. Doi tu dong nhan sticker khi hoan thanh/thang tro tuong ung
+  // (xem utils/scoring.js -> awardStickersForGame), KHONG con doi diem lay qua nhu truoc.
+  // Ap dung sticker CHI do BTC (admin) thuc hien tren dashboard (khong cho doi tu dung) de
+  // dam bao dung thoi diem trong luc dieu khien vong chung ket.
+  router.get('/stickers', (req, res) => {
+    const stickers = db.prepare('SELECT * FROM stickers ORDER BY id ASC').all()
+      .map(s => ({ ...s, image_url: s.image_url || resolveStickerImage(s.key) }));
+    res.json({ stickers });
   });
 
-  router.post('/gifts', (req, res) => {
-    const { name, description, cost_points, stock, image_url } = req.body || {};
-    if (!name || cost_points == null) return res.status(400).json({ error: 'Thiếu tên hoặc số điểm' });
-    const info = db.prepare(`INSERT INTO gifts (name, description, cost_points, stock, image_url) VALUES (?, ?, ?, ?, ?)`)
-      .run(name, description || '', Number(cost_points), Number(stock) || 0, image_url || '');
-    res.json({ ok: true, id: info.lastInsertRowid });
-  });
-
-  router.put('/gifts/:id', (req, res) => {
-    const id = Number(req.params.id);
-    const g = db.prepare('SELECT * FROM gifts WHERE id = ?').get(id);
-    if (!g) return res.status(404).json({ error: 'Không tìm thấy quà' });
-    const b = req.body || {};
-    db.prepare(`UPDATE gifts SET name=?, description=?, cost_points=?, stock=?, image_url=?, active=? WHERE id=?`)
-      .run(b.name ?? g.name, b.description ?? g.description, b.cost_points ?? g.cost_points,
-        b.stock ?? g.stock, b.image_url ?? g.image_url,
-        b.active !== undefined ? (b.active ? 1 : 0) : g.active, id);
+  router.put('/stickers/:key', (req, res) => {
+    const key = req.params.key;
+    const s = db.prepare('SELECT * FROM stickers WHERE key = ?').get(key);
+    if (!s) return res.status(404).json({ error: 'Không tìm thấy sticker' });
+    const { name, description, image_url } = req.body || {};
+    db.prepare(`UPDATE stickers SET name=?, description=?, image_url=? WHERE key=?`)
+      .run(name ?? s.name, description ?? s.description, image_url ?? s.image_url, key);
     res.json({ ok: true });
   });
 
-  router.delete('/gifts/:id', (req, res) => {
-    db.prepare('DELETE FROM gifts WHERE id = ?').run(Number(req.params.id));
-    res.json({ ok: true });
-  });
-
-  // ================= REDEMPTIONS =================
-  router.get('/redemptions', (req, res) => {
+  // Kho sticker cua tat ca cac doi (dang giu + lich su da dung) de BTC xem khi ap dung.
+  router.get('/stickers/inventory', (req, res) => {
     const rows = db.prepare(`
-      SELECT r.id, r.team_id, t.name as team_name, r.gift_id, g.name as gift_name,
-             r.points_spent, r.status, r.created_at, r.handled_at, r.handled_by
-      FROM redemptions r
-      JOIN teams t ON t.id = r.team_id
-      JOIN gifts g ON g.id = r.gift_id
-      ORDER BY r.id DESC
+      SELECT ts.id, ts.team_id, t.name as team_name, ts.sticker_key, s.name as sticker_name,
+             ts.status, ts.awarded_at, ts.awarded_reason, ts.used_at, ts.used_by, ts.target_team_id,
+             tt.name as target_team_name
+      FROM team_stickers ts
+      JOIN teams t ON t.id = ts.team_id
+      JOIN stickers s ON s.key = ts.sticker_key
+      LEFT JOIN teams tt ON tt.id = ts.target_team_id
+      ORDER BY ts.id DESC
     `).all();
-    res.json({ redemptions: rows });
+    res.json({ inventory: rows });
   });
 
-  router.put('/redemptions/:id', (req, res) => {
-    const id = Number(req.params.id);
-    const { status } = req.body || {};
-    if (!['pending', 'approved', 'rejected', 'delivered'].includes(status)) {
-      return res.status(400).json({ error: 'Trạng thái không hợp lệ' });
-    }
-    const redemption = db.prepare('SELECT * FROM redemptions WHERE id = ?').get(id);
-    if (!redemption) return res.status(404).json({ error: 'Không tìm thấy' });
+  // Ap dung 1 sticker cua 1 doi - hieu ung tuy loai:
+  // - ke_cuop: tru diem doi bi nham bang dung so diem lan tra loi dung GAN NHAT cua ho o vong
+  //   chung ket (khong cong lai cho doi dung sticker).
+  // - nhan_doi: cong them cho doi dung sticker dung bang tong diem hien co CUA RIENG vong
+  //   chung ket (tuc nhan doi so diem chung ket, khong dung tong diem toan giai).
+  // - dong_bang: chi dung duoc khi cau hoi dang mo cho bam chuong (phase='question_open') -
+  //   chuyen thang quyen tra loi (thang buzz) sang doi dung sticker.
+  // - ngoi_sao_hi_vong: chi dung duoc khi chua mo cau hoi tiep theo (phase='idle') - danh dau
+  //   truoc quyen tra loi, se duoc "tieu thu" thanh thang buzz + thuong 7 diem ngay khi BTC mo
+  //   cau hoi tiep theo (xem /final/open/:questionId va /final/judge ben duoi).
+  router.post('/stickers/apply', (req, res) => {
+    const { team_id, sticker_key, target_team_id } = req.body || {};
+    const teamId = Number(team_id);
+    const def = STICKER_BY_KEY[sticker_key];
+    if (!teamId || !def) return res.status(400).json({ error: 'Thiếu đội hoặc sticker không hợp lệ' });
 
-    // neu tu choi -> hoan diem va hoan kho
-    if (status === 'rejected' && redemption.status !== 'rejected') {
-      const team = db.prepare('SELECT code FROM teams WHERE id = ?').get(redemption.team_id);
-      db.prepare('UPDATE teams SET total_points = total_points + ? WHERE id = ?').run(redemption.points_spent, redemption.team_id);
-      db.prepare('UPDATE gifts SET stock = stock + 1 WHERE id = ?').run(redemption.gift_id);
+    const owned = db.prepare(`SELECT * FROM team_stickers WHERE team_id = ? AND sticker_key = ? AND status = 'available' ORDER BY id ASC LIMIT 1`)
+      .get(teamId, sticker_key);
+    if (!owned) return res.status(400).json({ error: 'Đội này không có sticker khả dụng' });
+
+    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
+    if (!team) return res.status(404).json({ error: 'Không tìm thấy đội' });
+
+    const targetId = target_team_id ? Number(target_team_id) : null;
+    let resultMsg = '';
+
+    if (sticker_key === 'ke_cuop') {
+      if (!targetId) return res.status(400).json({ error: 'Thiếu đội bị lấy điểm' });
+      const lastCorrect = db.prepare(`
+        SELECT * FROM score_history WHERE team_id = ? AND round_name = 'Chung kết' AND delta > 0
+        ORDER BY id DESC LIMIT 1
+      `).get(targetId);
+      if (!lastCorrect) return res.status(400).json({ error: 'Đội bị nhắm chưa có lượt trả lời đúng nào ở chung kết để lấy điểm' });
+      const amount = lastCorrect.delta;
+      db.prepare('UPDATE teams SET total_points = total_points - ? WHERE id = ?').run(amount, targetId);
       db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
-                  VALUES (?, ?, ?, ?, ?)`)
-        .run(redemption.team_id, redemption.points_spent, 'Hoàn điểm do đổi quà bị từ chối', 'Đổi quà', req.session.adminUsername);
-      const updated = db.prepare('SELECT total_points FROM teams WHERE id = ?').get(redemption.team_id);
-      io.to(`team-${redemption.team_id}`).to('admins').emit('score:update', {
-        team_id: redemption.team_id, total_points: updated.total_points,
-      });
+                  VALUES (?, ?, ?, 'Chung kết', ?)`)
+        .run(targetId, -amount, `Bị đội ${team.name} dùng sticker Kẻ cướp lấy đi ${amount} điểm`, req.session.adminUsername);
+      const updatedTarget = db.prepare('SELECT total_points FROM teams WHERE id = ?').get(targetId);
+      io.to(`team-${targetId}`).to('admins').emit('score:update', { team_id: targetId, total_points: updatedTarget.total_points });
+      resultMsg = `Đã lấy ${amount} điểm của đội bị nhắm`;
+    } else if (sticker_key === 'nhan_doi') {
+      const row = db.prepare(`SELECT COALESCE(SUM(delta), 0) as total FROM score_history WHERE team_id = ? AND round_name = 'Chung kết'`).get(teamId);
+      const current = row.total || 0;
+      if (current <= 0) return res.status(400).json({ error: 'Đội chưa có điểm ở vòng chung kết để nhân đôi' });
+      db.prepare('UPDATE teams SET total_points = total_points + ? WHERE id = ?').run(current, teamId);
+      db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
+                  VALUES (?, ?, ?, 'Chung kết', ?)`)
+        .run(teamId, current, `Dùng sticker Nhân đôi (nhân đôi ${current} điểm chung kết)`, req.session.adminUsername);
+      const updated = db.prepare('SELECT total_points FROM teams WHERE id = ?').get(teamId);
+      io.to(`team-${teamId}`).to('admins').emit('score:update', { team_id: teamId, total_points: updated.total_points });
+      resultMsg = `Đã nhân đôi ${current} điểm chung kết`;
+    } else if (sticker_key === 'dong_bang') {
+      if (!targetId) return res.status(400).json({ error: 'Thiếu đội bị khoá quyền trả lời' });
+      const state = db.prepare('SELECT * FROM final_state WHERE id = 1').get();
+      if (state.phase !== 'question_open') {
+        return res.status(400).json({ error: 'Chỉ dùng được khi câu hỏi đang mở chuông' });
+      }
+      clearBuzzCooldown();
+      db.prepare(`UPDATE final_state SET phase='buzzed', buzzer_winner_team_id=?, buzz_locked_at=datetime('now') WHERE id=1`).run(teamId);
+      io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
+      resultMsg = `Đã khoá quyền trả lời, chuyển quyền trả lời sang đội ${team.name}`;
+    } else if (sticker_key === 'ngoi_sao_hi_vong') {
+      const state = db.prepare('SELECT * FROM final_state WHERE id = 1').get();
+      if (state.phase !== 'idle') {
+        return res.status(400).json({ error: 'Chỉ dùng được khi chưa mở câu hỏi tiếp theo' });
+      }
+      db.prepare('UPDATE final_state SET pending_star_team_id = ? WHERE id = 1').run(teamId);
+      io.to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
+      resultMsg = `Đội ${team.name} đã giành trước quyền trả lời câu hỏi tiếp theo`;
+    } else {
+      return res.status(400).json({ error: 'Sticker không hợp lệ' });
     }
 
-    db.prepare(`UPDATE redemptions SET status = ?, handled_at = datetime('now'), handled_by = ? WHERE id = ?`)
-      .run(status, req.session.adminUsername, id);
+    db.prepare(`UPDATE team_stickers SET status='used', used_at=datetime('now'), used_by=?, target_team_id=? WHERE id=?`)
+      .run(req.session.adminUsername, targetId, owned.id);
+    io.emit('stickers:update');
 
-    io.to(`team-${redemption.team_id}`).to('admins').emit('redemption:update', { id, status });
-    res.json({ ok: true });
+    res.json({ ok: true, message: resultMsg });
   });
 
   // ================= FINAL ROUND =================
@@ -361,14 +424,37 @@ module.exports = function (io) {
     res.json({ ok: true });
   });
 
+  // Trang thai day du (rieng cho BTC) cua vong chung ket, gom ca pending_star_team_id - CHI
+  // tra ve cho admin (khong dua vao getFinalStatePayload dung chung, vi payload do cung duoc
+  // gui cho cac doi choi va se lo doi nao dang giu sticker "Ngoi sao hi vong" truoc khi dung).
+  router.get('/final/state', (req, res) => {
+    const state = db.prepare('SELECT * FROM final_state WHERE id = 1').get();
+    const pendingStarTeam = state.pending_star_team_id
+      ? db.prepare('SELECT id, name, color FROM teams WHERE id = ?').get(state.pending_star_team_id)
+      : null;
+    res.json({ ...req.app.get('getFinalStatePayload')(), pendingStarTeam });
+  });
+
   router.post('/final/open/:questionId', (req, res) => {
     const questionId = Number(req.params.questionId);
     const q = db.prepare('SELECT * FROM final_questions WHERE id = ?').get(questionId);
     if (!q) return res.status(404).json({ error: 'Không tìm thấy câu hỏi' });
 
     clearBuzzCooldown();
-    db.prepare(`UPDATE final_state SET phase='question_open', current_question_id=?, buzzer_winner_team_id=NULL,
-                buzz_open_at=datetime('now'), buzz_locked_at=NULL WHERE id=1`).run(questionId);
+    const state = db.prepare('SELECT * FROM final_state WHERE id = 1').get();
+
+    // Neu co doi da dung sticker "Ngoi sao hi vong" cho cau tiep theo (pending_star_team_id),
+    // "tieu thu" no ngay tai day: doi do thang buzz luon + duoc ghi nho thuong 7 diem co dinh
+    // (thay vi diem cua cau hoi) khi BTC cham diem o /final/judge ben duoi.
+    if (state.pending_star_team_id) {
+      db.prepare(`UPDATE final_state SET phase='buzzed', current_question_id=?, buzzer_winner_team_id=?,
+                  buzz_open_at=datetime('now'), buzz_locked_at=datetime('now'),
+                  pending_star_team_id=NULL, bonus_team_id=?, bonus_flat_points=7 WHERE id=1`)
+        .run(questionId, state.pending_star_team_id, state.pending_star_team_id);
+    } else {
+      db.prepare(`UPDATE final_state SET phase='question_open', current_question_id=?, buzzer_winner_team_id=NULL,
+                  buzz_open_at=datetime('now'), buzz_locked_at=NULL, bonus_team_id=NULL, bonus_flat_points=NULL WHERE id=1`).run(questionId);
+    }
     db.prepare(`UPDATE final_questions SET status='active' WHERE id=?`).run(questionId);
 
     io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
@@ -377,8 +463,10 @@ module.exports = function (io) {
 
   router.post('/final/reset-buzzer', (req, res) => {
     clearBuzzCooldown();
+    // Xoa luon bonus (neu co) vi reset chuong nghia la mo lai cho MOI doi tranh quyen, khong
+    // con rieng cho doi da giu sticker "Ngoi sao hi vong" nua.
     db.prepare(`UPDATE final_state SET phase='question_open', buzzer_winner_team_id=NULL,
-                buzz_open_at=datetime('now'), buzz_locked_at=NULL WHERE id=1`).run();
+                buzz_open_at=datetime('now'), buzz_locked_at=NULL, bonus_team_id=NULL, bonus_flat_points=NULL WHERE id=1`).run();
     io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
     res.json({ ok: true });
   });
@@ -389,7 +477,7 @@ module.exports = function (io) {
     if (state.current_question_id) {
       db.prepare(`UPDATE final_questions SET status='closed' WHERE id=?`).run(state.current_question_id);
     }
-    db.prepare(`UPDATE final_state SET phase='idle', buzzer_winner_team_id=NULL WHERE id=1`).run();
+    db.prepare(`UPDATE final_state SET phase='idle', buzzer_winner_team_id=NULL, bonus_team_id=NULL, bonus_flat_points=NULL WHERE id=1`).run();
     io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
     res.json({ ok: true });
   });
@@ -407,7 +495,11 @@ module.exports = function (io) {
     const questionId = state.current_question_id;
     const q = db.prepare('SELECT * FROM final_questions WHERE id = ?').get(questionId);
     const teamId = state.buzzer_winner_team_id;
-    const delta = correct ? q.points : -q.points;
+    // Doi dang choi voi sticker "Ngoi sao hi vong" (bonus_team_id = doi nay) neu tra loi DUNG
+    // thi duoc cong diem thuong co dinh (bonus_flat_points, mac dinh 7) thay vi diem cua cau hoi;
+    // neu tra loi sai van bi tru diem cau hoi binh thuong (sticker khong bao ve khi tra loi sai).
+    const hasBonus = state.bonus_team_id === teamId && state.bonus_flat_points;
+    const delta = correct ? (hasBonus ? state.bonus_flat_points : q.points) : -q.points;
 
     db.prepare('UPDATE teams SET total_points = total_points + ? WHERE id = ?').run(delta, teamId);
     db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
@@ -421,11 +513,12 @@ module.exports = function (io) {
 
     if (correct) {
       db.prepare(`UPDATE final_questions SET status='closed' WHERE id=?`).run(q.id);
-      db.prepare(`UPDATE final_state SET phase='idle', buzzer_winner_team_id=NULL WHERE id=1`).run();
+      db.prepare(`UPDATE final_state SET phase='idle', buzzer_winner_team_id=NULL, bonus_team_id=NULL, bonus_flat_points=NULL WHERE id=1`).run();
       io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
     } else {
-      // Khoa chuong tam thoi de cac doi kip binh tinh / MC kip thong bao, sau 2 giay tu dong mo lai
-      db.prepare(`UPDATE final_state SET phase='wrong_cooldown', buzzer_winner_team_id=NULL WHERE id=1`).run();
+      // Khoa chuong tam thoi de cac doi kip binh tinh / MC kip thong bao, sau 2 giay tu dong mo lai.
+      // Xoa bonus vi sticker "Ngoi sao hi vong" chi ap dung cho luot bam dau tien cua doi da giu sao.
+      db.prepare(`UPDATE final_state SET phase='wrong_cooldown', buzzer_winner_team_id=NULL, bonus_team_id=NULL, bonus_flat_points=NULL WHERE id=1`).run();
       io.to('final-players').to('admins').emit('final:state', req.app.get('getFinalStatePayload')());
 
       buzzCooldownTimer = setTimeout(() => {

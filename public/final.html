@@ -196,7 +196,10 @@ function render(state) {
     winnerBanner.style.display = 'block';
     winnerBanner.style.background = state.winnerTeam ? state.winnerTeam.color + '33' : '';
     winnerBanner.style.color = state.winnerTeam ? state.winnerTeam.color : '';
-    winnerBanner.textContent = state.winnerTeam ? `Đội trả lời: ${state.winnerTeam.name}` : '';
+    // bonusPoints: doi dang choi voi sticker "Ngoi sao hi vong" (xem server.js -> getFinalStatePayload)
+    winnerBanner.textContent = state.winnerTeam
+      ? `Đội trả lời: ${state.winnerTeam.name}${state.bonusPoints ? ` 🌟 (+${state.bonusPoints} điểm nếu đúng)` : ''}`
+      : '';
   } else if (state.phase === 'wrong_cooldown') {
     phaseLabel.textContent = '❌ Trả lời sai — chuông sẽ mở lại sau giây lát cho các đội khác...';
     buzzerBtn.disabled = true;
@@ -211,6 +214,14 @@ function render(state) {
 }
 
 socket.on('final:state', render);
+
+// Bao diem thay doi ngay tren man hinh thi (vd bi sticker "Ke cuop" lay diem, hoac vua
+// dung sticker "Nhan doi") - final.html truoc day khong nghe socket nay nen doi khong biet.
+socket.on('score:update', (payload) => {
+  if (!me || payload.team_id !== me.id) return;
+  const sign = payload.delta > 0 ? '+' : '';
+  toast(`Điểm của bạn vừa thay đổi: ${sign}${payload.delta} (còn ${payload.total_points} điểm)`, payload.delta >= 0 ? 'success' : 'error');
+});
 </script>
 </body>
 </html>

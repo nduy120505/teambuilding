@@ -24,7 +24,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="teams">👥 Bảng xếp hạng</button>
     <button class="tab-btn" data-tab="map">🗺️ Bản đồ</button>
-    <button class="tab-btn" data-tab="gifts">🎁 Đổi thưởng</button>
+    <button class="tab-btn" data-tab="stickers">🎟️ Sticker chung kết</button>
     <button class="tab-btn" data-tab="final">🔔 Ai thông minh hơn sinh viên năm nhất</button>
     <button class="tab-btn" data-tab="gamemasters">🎮 Quản trò</button>
   </div>
@@ -100,24 +100,42 @@
     </div>
   </div>
 
-  <!-- ===================== GIFTS ===================== -->
-  <div id="tab-gifts" class="tab-panel" style="display:none;">
-    <div class="flex-between">
-      <div class="section-title" style="margin:0;">Đổi điểm</div>
-      <button class="btn sm" onclick="openGiftModal()">+ Thêm phần thưởng</button>
-    </div>
+  <!-- ===================== STICKERS ===================== -->
+  <div id="tab-stickers" class="tab-panel" style="display:none;">
+    <p class="small-note">Đội tự động nhận sticker khi hoàn thành/thắng trò tương ứng (Chặng 1-4). BTC dùng khu vực bên dưới để áp dụng hiệu ứng sticker cho đội trong vòng chung kết.</p>
+
+    <div class="section-title" style="margin-top:0;">Danh mục sticker</div>
     <div class="card">
       <table>
-        <thead><tr><th>Tên quà</th><th>Điểm</th><th>Kho</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-        <tbody id="giftsBody"></tbody>
+        <thead><tr><th>Sticker</th><th>Mô tả</th><th>Trò nguồn</th><th>Thao tác</th></tr></thead>
+        <tbody id="stickerCatalogBody"></tbody>
       </table>
     </div>
 
-    <div class="section-title">Yêu cầu đổi thưởng</div>
+    <div class="section-title">Áp dụng sticker cho đội</div>
+    <div class="card">
+      <div class="grid cols-2">
+        <div>
+          <label>Đội dùng sticker</label>
+          <select id="applyStickerTeam" onchange="renderApplyStickerOptions()"></select>
+        </div>
+        <div>
+          <label>Sticker (chỉ hiện sticker đội đang có sẵn)</label>
+          <select id="applyStickerKey" onchange="renderApplyStickerOptions()"></select>
+        </div>
+      </div>
+      <div id="applyStickerTargetWrap" style="margin-top:10px; display:none;">
+        <label id="applyStickerTargetLabel">Đội bị nhắm</label>
+        <select id="applyStickerTarget"></select>
+      </div>
+      <button class="btn block" style="margin-top:14px;" onclick="applySticker()">✅ Áp dụng sticker</button>
+    </div>
+
+    <div class="section-title">Kho sticker của các đội</div>
     <div class="card">
       <table>
-        <thead><tr><th>Thời gian</th><th>Đội</th><th>Quà</th><th>Điểm</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
-        <tbody id="redemptionsBody"></tbody>
+        <thead><tr><th>Đội</th><th>Sticker</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
+        <tbody id="stickerInventoryBody"></tbody>
       </table>
     </div>
   </div>
@@ -654,82 +672,122 @@ async function deleteScheduleEntry(stageId) {
   toast('Đã xoá'); loadTeamSchedule();
 }
 
-/* ===================== GIFTS ===================== */
-async function loadGifts() {
-  const { gifts } = await api('GET', '/api/admin/gifts');
-  document.getElementById('giftsBody').innerHTML = gifts.map(g => `
+/* ===================== STICKERS ===================== */
+// 4 sticker co dinh (khong them/bot duoc, chi sua ten/mo ta/anh) - doi nhan tu dong khi hoan
+// thanh/thang tro tuong ung (xem utils/scoring.js). BTC ap dung hieu ung o day khi doi muon dung.
+let STICKERS_CATALOG = [];
+let STICKER_INVENTORY = [];
+
+const STICKER_TARGET_INFO = {
+  ke_cuop: { needsTarget: true, label: 'Đội bị lấy điểm' },
+  nhan_doi: { needsTarget: false },
+  dong_bang: { needsTarget: true, label: 'Đội bị khoá quyền trả lời' },
+  ngoi_sao_hi_vong: { needsTarget: false },
+};
+
+async function loadStickers() {
+  const { stickers } = await api('GET', '/api/admin/stickers');
+  STICKERS_CATALOG = stickers;
+  document.getElementById('stickerCatalogBody').innerHTML = stickers.map(s => `
     <tr>
-      <td>${escapeHtml(g.name)}</td>
-      <td>${g.cost_points}</td>
-      <td>${g.stock}</td>
-      <td><span class="badge ${g.active ? 'completed':'locked'}">${g.active ? 'Đang mở' : 'Đã ẩn'}</span></td>
-      <td class="row-actions">
-        <button class="btn secondary sm" onclick="openGiftModal(${g.id})">Sửa</button>
-        <button class="btn danger sm" onclick="deleteGift(${g.id})">Xoá</button>
-      </td>
+      <td><b>${escapeHtml(s.name)}</b></td>
+      <td>${escapeHtml(s.description || '-')}</td>
+      <td>${escapeHtml((SCORING_GAMES_LIST.find(g => g.key === s.source_game) || {}).label || s.source_game || '-')}</td>
+      <td class="row-actions"><button class="btn secondary sm" onclick="openEditStickerModal('${s.key}')">Sửa</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có quà nào.</td></tr>';
+  `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có sticker nào.</td></tr>';
+  populateApplyStickerTeamSelect();
 }
 
-function openGiftModal(id) {
+function openEditStickerModal(key) {
+  const s = STICKERS_CATALOG.find(x => x.key === key);
+  if (!s) return;
   showModal(`
-    <h3 style="margin-top:0;">${id?'Sửa quà':'Thêm quà mới'}</h3>
-    <label>Tên quà</label><input id="gName">
-    <label>Mô tả</label><textarea id="gDesc" rows="2"></textarea>
-    <div class="grid cols-2">
-      <div><label>Điểm cần đổi</label><input id="gCost" type="number"></div>
-      <div><label>Số lượng kho</label><input id="gStock" type="number"></div>
-    </div>
-    <label>URL hình ảnh (tuỳ chọn)</label><input id="gImage">
+    <h3 style="margin-top:0;">Sửa sticker</h3>
+    <label>Tên sticker</label><input id="skName" value="${escapeHtml(s.name)}">
+    <label>Mô tả</label><textarea id="skDesc" rows="2">${escapeHtml(s.description || '')}</textarea>
+    <label>URL hình ảnh (tuỳ chọn - nếu để trống sẽ tự dùng file public/img/sticker-${s.key}.*)</label>
+    <input id="skImage" value="${escapeHtml(s.image_url && !s.image_url.startsWith('/img/sticker-') ? s.image_url : '')}">
     <div class="row-actions">
-      <button class="btn" onclick="saveGift(${id||'null'})">Lưu</button>
+      <button class="btn" onclick="saveStickerEdit('${s.key}')">Lưu</button>
       <button class="btn secondary" onclick="closeModal()">Huỷ</button>
     </div>
   `);
 }
 
-async function saveGift(id) {
+async function saveStickerEdit(key) {
   const body = {
-    name: document.getElementById('gName').value.trim(),
-    description: document.getElementById('gDesc').value.trim(),
-    cost_points: Number(document.getElementById('gCost').value),
-    stock: Number(document.getElementById('gStock').value),
-    image_url: document.getElementById('gImage').value.trim(),
+    name: document.getElementById('skName').value.trim(),
+    description: document.getElementById('skDesc').value.trim(),
+    image_url: document.getElementById('skImage').value.trim(),
   };
-  if (!body.name || !body.cost_points) return toast('Nhập tên và số điểm', 'error');
   try {
-    if (id) await api('PUT', `/api/admin/gifts/${id}`, body);
-    else await api('POST', '/api/admin/gifts', body);
-    closeModal(); toast('Đã lưu quà'); loadGifts();
+    await api('PUT', `/api/admin/stickers/${key}`, body);
+    closeModal(); toast('Đã lưu sticker'); loadStickers();
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function deleteGift(id) {
-  if (!confirm('Xoá quà này?')) return;
-  await api('DELETE', `/api/admin/gifts/${id}`);
-  toast('Đã xoá'); loadGifts();
-}
-
-async function loadRedemptions() {
-  const { redemptions } = await api('GET', '/api/admin/redemptions');
-  document.getElementById('redemptionsBody').innerHTML = redemptions.map(r => `
+async function loadStickerInventory() {
+  const { inventory } = await api('GET', '/api/admin/stickers/inventory');
+  STICKER_INVENTORY = inventory;
+  document.getElementById('stickerInventoryBody').innerHTML = inventory.map(row => `
     <tr>
-      <td>${fmtDateTime(r.created_at)}</td>
-      <td>${escapeHtml(r.team_name)}</td>
-      <td>${escapeHtml(r.gift_name)}</td>
-      <td>${r.points_spent}</td>
-      <td><span class="badge ${r.status}">${({pending:'Chờ duyệt',approved:'Đã duyệt',rejected:'Từ chối',delivered:'Đã nhận'})[r.status]}</span></td>
-      <td class="row-actions">
-        ${r.status === 'pending' ? `<button class="btn success sm" onclick="setRedemption(${r.id},'approved')">Duyệt</button><button class="btn danger sm" onclick="setRedemption(${r.id},'rejected')">Từ chối</button>` : ''}
-        ${r.status === 'approved' ? `<button class="btn sm" onclick="setRedemption(${r.id},'delivered')">Đã giao</button>` : ''}
-      </td>
+      <td>${escapeHtml(row.team_name)}</td>
+      <td>${escapeHtml(row.sticker_name)}</td>
+      <td><span class="badge ${row.status === 'available' ? 'completed' : 'locked'}">${row.status === 'available' ? 'Còn dùng' : 'Đã dùng'}</span></td>
+      <td>${row.status === 'used'
+        ? `Dùng lúc ${fmtDateTime(row.used_at)}${row.target_team_name ? ' → ' + escapeHtml(row.target_team_name) : ''}`
+        : escapeHtml(row.awarded_reason || '-')}</td>
     </tr>
-  `).join('') || '<tr><td colspan="6" class="empty-hint">Chưa có yêu cầu nào.</td></tr>';
+  `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có sticker nào được trao.</td></tr>';
+  populateApplyStickerTeamSelect();
 }
 
-async function setRedemption(id, status) {
-  try { await api('PUT', `/api/admin/redemptions/${id}`, { status }); toast('Đã cập nhật'); loadRedemptions(); loadTeams(); }
-  catch (e) { toast(e.message, 'error'); }
+function populateApplyStickerTeamSelect() {
+  const sel = document.getElementById('applyStickerTeam');
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  if (prev) sel.value = prev;
+  renderApplyStickerOptions();
+}
+
+function renderApplyStickerOptions() {
+  const teamId = Number(document.getElementById('applyStickerTeam').value);
+  const available = STICKER_INVENTORY.filter(r => r.team_id === teamId && r.status === 'available');
+  const keySel = document.getElementById('applyStickerKey');
+  const prevKey = keySel.value;
+  const uniqueKeys = [...new Map(available.map(r => [r.sticker_key, r])).values()];
+  keySel.innerHTML = uniqueKeys.length
+    ? uniqueKeys.map(r => `<option value="${r.sticker_key}">${escapeHtml(r.sticker_name)}</option>`).join('')
+    : '<option value="">(Đội chưa có sticker khả dụng)</option>';
+  if (prevKey && uniqueKeys.some(r => r.sticker_key === prevKey)) keySel.value = prevKey;
+
+  const key = keySel.value;
+  const info = STICKER_TARGET_INFO[key];
+  const wrap = document.getElementById('applyStickerTargetWrap');
+  if (info && info.needsTarget) {
+    wrap.style.display = 'block';
+    document.getElementById('applyStickerTargetLabel').textContent = info.label;
+    document.getElementById('applyStickerTarget').innerHTML = TEAMS.filter(t => t.id !== teamId)
+      .map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+async function applySticker() {
+  const team_id = Number(document.getElementById('applyStickerTeam').value);
+  const sticker_key = document.getElementById('applyStickerKey').value;
+  if (!team_id || !sticker_key) return toast('Chọn đội và sticker hợp lệ', 'error');
+  const info = STICKER_TARGET_INFO[sticker_key];
+  const target_team_id = info && info.needsTarget ? Number(document.getElementById('applyStickerTarget').value) : undefined;
+  if (info && info.needsTarget && !target_team_id) return toast('Chọn đội bị nhắm', 'error');
+  try {
+    const { message } = await api('POST', '/api/admin/stickers/apply', { team_id, sticker_key, target_team_id });
+    toast(message || 'Đã áp dụng sticker');
+    loadStickerInventory(); loadTeams();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 /* ===================== FINAL ROUND ===================== */
@@ -829,6 +887,8 @@ async function loadViolations() {
 }
 
 /* ===================== TÀI KHOẢN QUẢN TRÒ ===================== */
+// 1 quan tro co the phu trach NHIEU tro (vi du chuyen phu trach ca 2 chang khac nhau) - chon
+// bang checkbox thay vi dropdown 1-lua-chon nhu truoc.
 let GAME_MASTERS = [];
 let SCORING_GAMES_LIST = [];
 
@@ -841,7 +901,7 @@ async function loadGameMasters() {
     <tr>
       <td><b>${escapeHtml(gm.username)}</b></td>
       <td>${escapeHtml(gm.display_name || '-')}</td>
-      <td>${escapeHtml(gameLabel(gm.assigned_game))}</td>
+      <td>${(gm.assigned_games || []).map(gameLabel).map(escapeHtml).join(', ') || '-'}</td>
       <td class="row-actions">
         <button class="btn secondary sm" onclick="openGameMasterModal(${gm.id})">Sửa</button>
         <button class="btn danger sm" onclick="deleteGameMaster(${gm.id})">Xoá</button>
@@ -852,15 +912,21 @@ async function loadGameMasters() {
 
 function openGameMasterModal(id) {
   const gm = id ? GAME_MASTERS.find(x => x.id === id) : null;
-  const gamesOptions = SCORING_GAMES_LIST.map(g => `<option value="${g.key}" ${gm && gm.assigned_game === g.key ? 'selected' : ''}>${escapeHtml(g.label)}</option>`).join('');
+  const assigned = gm ? (gm.assigned_games || []) : [];
+  const checkboxes = SCORING_GAMES_LIST.map(g => `
+    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; margin:4px 0;">
+      <input type="checkbox" value="${g.key}" class="gmGameCheckbox" ${assigned.includes(g.key) ? 'checked' : ''}>
+      ${escapeHtml(g.label)}
+    </label>
+  `).join('');
   showModal(`
     <h3 style="margin-top:0;">${gm ? 'Sửa quản trò' : 'Thêm quản trò'}</h3>
     <label>Tài khoản đăng nhập</label>
     <input id="gmUsername" value="${gm ? escapeHtml(gm.username) : ''}" ${gm ? 'disabled' : ''} placeholder="VD: qt_khoidong">
     <label>Tên hiển thị</label>
-    <input id="gmDisplayName" value="${gm ? escapeHtml(gm.display_name || '') : ''}" placeholder="VD: Anh Tuấn - Trò khởi động">
-    <label>Trò phụ trách</label>
-    <select id="gmAssignedGame">${gamesOptions}</select>
+    <input id="gmDisplayName" value="${gm ? escapeHtml(gm.display_name || '') : ''}" placeholder="VD: Anh Tuấn">
+    <label>Trò phụ trách (có thể chọn nhiều)</label>
+    <div id="gmGamesWrap">${checkboxes}</div>
     <label>${gm ? 'Đổi mật khẩu (để trống nếu giữ nguyên)' : 'Mật khẩu'}</label>
     <input id="gmPassword" type="text" placeholder="Mật khẩu đăng nhập">
     <div class="row-actions">
@@ -872,15 +938,16 @@ function openGameMasterModal(id) {
 
 async function saveGameMaster(id) {
   const display_name = document.getElementById('gmDisplayName').value.trim();
-  const assigned_game = document.getElementById('gmAssignedGame').value;
+  const assigned_games = [...document.querySelectorAll('.gmGameCheckbox:checked')].map(el => el.value);
   const password = document.getElementById('gmPassword').value;
+  if (!assigned_games.length) return toast('Chọn ít nhất 1 trò phụ trách', 'error');
   try {
     if (id) {
-      await api('PUT', `/api/admin/game-masters/${id}`, { display_name, assigned_game, password: password || undefined });
+      await api('PUT', `/api/admin/game-masters/${id}`, { display_name, assigned_games, password: password || undefined });
     } else {
       const username = document.getElementById('gmUsername').value.trim();
       if (!username || !password) return toast('Cần nhập tài khoản và mật khẩu', 'error');
-      await api('POST', '/api/admin/game-masters', { username, display_name, assigned_game, password });
+      await api('POST', '/api/admin/game-masters', { username, display_name, assigned_games, password });
     }
     closeModal(); toast('Đã lưu tài khoản quản trò'); loadGameMasters();
   } catch (e) { toast(e.message, 'error'); }
@@ -896,8 +963,7 @@ async function deleteGameMaster(id) {
 
 /* ===================== REALTIME ===================== */
 socket.on('score:update', () => { loadTeams(); loadScoreHistory(); });
-socket.on('redemption:new', () => loadRedemptions());
-socket.on('redemption:update', () => { loadRedemptions(); loadTeams(); });
+socket.on('stickers:update', () => loadStickerInventory());
 socket.on('map:update', () => { loadMapSettings(); loadTeamSchedule(); });
 socket.on('final:state', renderLiveState);
 socket.on('final:violation', (v) => {
@@ -909,12 +975,12 @@ socket.on('final:violation', (v) => {
 async function initAll() {
   await loadTeams();
   await loadMapSettings();
-  await loadGifts();
-  await loadRedemptions();
+  await loadGameMasters();
+  await loadStickers();
+  await loadStickerInventory();
   await loadQuestions();
   await loadScoreHistory();
   await loadViolations();
-  await loadGameMasters();
 }
 initAll();
 </script>

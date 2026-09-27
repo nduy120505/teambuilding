@@ -27,4 +27,11 @@ function resolveLoginBackground() {
   return findImageByBasename('login-background');
 }
 
-module.exports = { resolveMapBackground, resolveLoginBackground };
+// Anh sticker (4 sticker quyen nang vong chung ket): quy uoc file "sticker-<key>.<duoi anh>"
+// trong public/img/ (vd sticker-ke_cuop.png) - user se tu them anh sau, chua co thi tra ve
+// null de frontend hien placeholder/emoji thay the.
+function resolveStickerImage(key) {
+  return findImageByBasename(`sticker-${key}`);
+}
+
+module.exports = { resolveMapBackground, resolveLoginBackground, resolveStickerImage };

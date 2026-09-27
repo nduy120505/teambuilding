@@ -57,7 +57,7 @@ router.get('/admin/me', (req, res) => {
   res.json({ admin: { username: req.session.adminUsername } });
 });
 
-// ---- Dang nhap quan tro (phu trach 1 tro, tu cong diem cho tro do) ----
+// ---- Dang nhap quan tro (co the phu trach NHIEU tro, xem game_master_assignments) ----
 router.post('/gamemaster/login', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Thiếu tài khoản hoặc mật khẩu' });
@@ -67,22 +67,25 @@ router.post('/gamemaster/login', (req, res) => {
     return res.status(401).json({ error: 'Tài khoản hoặc mật khẩu không đúng' });
   }
 
+  const games = db.prepare('SELECT game_key FROM game_master_assignments WHERE game_master_id = ?')
+    .all(gm.id).map(r => r.game_key);
+
   req.session.gameMasterId = gm.id;
   req.session.gameMasterUsername = gm.username;
-  req.session.gameMasterGame = gm.assigned_game;
-  res.json({ ok: true, gameMaster: { username: gm.username, display_name: gm.display_name, assigned_game: gm.assigned_game } });
+  req.session.gameMasterGames = games;
+  res.json({ ok: true, gameMaster: { username: gm.username, display_name: gm.display_name, assigned_games: games } });
 });
 
 router.post('/gamemaster/logout', (req, res) => {
   req.session.gameMasterId = null;
   req.session.gameMasterUsername = null;
-  req.session.gameMasterGame = null;
+  req.session.gameMasterGames = null;
   res.json({ ok: true });
 });
 
 router.get('/gamemaster/me', (req, res) => {
   if (!req.session.gameMasterId) return res.status(401).json({ error: 'Chưa đăng nhập' });
-  res.json({ gameMaster: { username: req.session.gameMasterUsername, assigned_game: req.session.gameMasterGame } });
+  res.json({ gameMaster: { username: req.session.gameMasterUsername, assigned_games: req.session.gameMasterGames || [] } });
 });
 
 module.exports = router;

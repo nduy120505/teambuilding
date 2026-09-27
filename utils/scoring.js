@@ -2,6 +2,8 @@
 // admin (/api/admin/scoring/:game) va route quan tro (/api/gamemaster/score), de tranh
 // viet trung logic va lech cong thuc giua 2 noi.
 
+const { STICKER_DEFS } = require('./stickers');
+
 const GAME_SCORING_RULES = {
   khoi_dong: { label: 'Trò khởi động' },
   pha_vong_doat_bau: { label: 'Phá vòng đoạt báu' },
@@ -74,7 +76,9 @@ function computeGameScoring(game, entries) {
 
 // Ghi ket qua vao DB (total_points + score_history) va bao realtime qua socket.
 // db, io: lay tu caller. createdBy: ten nguoi thuc hien (admin username hoac quan tro username).
-function applyGameScoring(db, io, results, rule, createdBy) {
+// game (tuy chon): key cua tro (vd 'khoi_dong') - neu tro nay co dinh nghia sticker (xem
+// utils/stickers.js) thi se tu dong cong sticker tuong ung cho (cac) doi lien quan.
+function applyGameScoring(db, io, results, rule, createdBy, game) {
   for (const r of results) {
     db.prepare('UPDATE teams SET total_points = total_points + ? WHERE id = ?').run(r.delta, r.team_id);
     db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
@@ -92,6 +96,32 @@ function applyGameScoring(db, io, results, rule, createdBy) {
       round_name: rule.label,
     });
   }
+
+  if (game && STICKER_DEFS[game]) {
+    awardStickersForGame(db, io, game, results, rule);
+  }
+}
+
+// Cong sticker cho doi hoan thanh tro (kind='don' -> MOI doi trong ket qua deu nhan; kind=
+// 'doi_khang' -> chi doi co delta cao nhat - tuc doi thang - moi nhan) theo dung yeu cau:
+// "doi hoan thanh chang don thi nhan luon, con cac chang doi khang thi chi doi thang moi nhan".
+function awardStickersForGame(db, io, game, results, rule) {
+  const def = STICKER_DEFS[game];
+  if (!def || !results.length) return;
+  const stage = db.prepare('SELECT kind FROM stages WHERE name = ?').get(rule.label);
+  const kind = stage ? stage.kind : 'don';
+
+  let winners = results;
+  if (kind === 'doi_khang') {
+    const best = results.reduce((a, b) => (b.delta > a.delta ? b : a), results[0]);
+    winners = [best];
+  }
+
+  const insertSticker = db.prepare(`INSERT INTO team_stickers (team_id, sticker_key, awarded_reason) VALUES (?, ?, ?)`);
+  for (const w of winners) {
+    insertSticker.run(w.team_id, def.key, `Hoàn thành ${rule.label}`);
+  }
+  io.emit('stickers:update');
 }
 
 module.exports = { GAME_SCORING_RULES, computeGameScoring, applyGameScoring };

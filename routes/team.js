@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db/database');
 const { requireTeam } = require('../middleware/auth');
-const { resolveMapBackground } = require('../utils/mapBackground');
+const { resolveMapBackground, resolveStickerImage } = require('../utils/mapBackground');
 
 module.exports = function (io) {
   const router = express.Router();
@@ -47,57 +47,26 @@ module.exports = function (io) {
     res.json({ team, history, leaderboard });
   });
 
-  // ---------------- GIFTS ----------------
-  router.get('/gifts', (req, res) => {
+  // ---------------- STICKERS (thay the "Doi qua" cu) ----------------
+  // Doi chi XEM kho sticker cua minh (dang giu + da dung) - viec AP DUNG sticker do BTC thuc
+  // hien tren dashboard (xem routes/admin.js -> /stickers/apply), doi khong tu dung duoc.
+  router.get('/stickers', (req, res) => {
     const teamId = req.session.teamId;
-    const gifts = db.prepare('SELECT * FROM gifts WHERE active = 1 ORDER BY cost_points ASC').all();
-    const myRedemptions = db.prepare(`
-      SELECT r.id, r.points_spent, r.status, r.created_at, g.name as gift_name
-      FROM redemptions r JOIN gifts g ON g.id = r.gift_id
-      WHERE r.team_id = ? ORDER BY r.id DESC
+    const catalog = db.prepare('SELECT key, name, description, image_url FROM stickers ORDER BY id ASC').all();
+    const mine = db.prepare(`
+      SELECT ts.id, ts.sticker_key, ts.status, ts.awarded_at, ts.awarded_reason,
+             ts.used_at, tt.name as target_team_name
+      FROM team_stickers ts
+      LEFT JOIN teams tt ON tt.id = ts.target_team_id
+      WHERE ts.team_id = ? ORDER BY ts.id DESC
     `).all(teamId);
-    const team = db.prepare('SELECT total_points FROM teams WHERE id = ?').get(teamId);
-    res.json({ gifts, myRedemptions, total_points: team.total_points });
-  });
-
-  router.post('/gifts/:id/redeem', (req, res) => {
-    const teamId = req.session.teamId;
-    const giftId = Number(req.params.id);
-
-    const gift = db.prepare('SELECT * FROM gifts WHERE id = ? AND active = 1').get(giftId);
-    if (!gift) return res.status(404).json({ error: 'Không tìm thấy quà' });
-    if (gift.stock <= 0) return res.status(400).json({ error: 'Quà đã hết' });
-
-    const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId);
-    if (team.total_points < gift.cost_points) {
-      return res.status(400).json({ error: 'Đội chưa đủ điểm để đổi quà này' });
-    }
-
-    let redemptionId;
-    try {
-      db.exec('BEGIN');
-      db.prepare('UPDATE gifts SET stock = stock - 1 WHERE id = ?').run(giftId);
-      db.prepare('UPDATE teams SET total_points = total_points - ? WHERE id = ?').run(gift.cost_points, teamId);
-      db.prepare(`INSERT INTO score_history (team_id, delta, reason, round_name, created_by)
-                  VALUES (?, ?, ?, ?, ?)`)
-        .run(teamId, -gift.cost_points, `Đổi quà: ${gift.name}`, 'Đổi quà', team.code);
-      const info = db.prepare(`INSERT INTO redemptions (team_id, gift_id, points_spent, status)
-                  VALUES (?, ?, ?, 'pending')`).run(teamId, giftId, gift.cost_points);
-      redemptionId = info.lastInsertRowid;
-      db.exec('COMMIT');
-    } catch (e) {
-      try { db.exec('ROLLBACK'); } catch (e2) { /* ignore */ }
-      return res.status(500).json({ error: 'Có lỗi khi đổi quà, thử lại sau' });
-    }
-
-    const updatedTeam = db.prepare('SELECT id, total_points FROM teams WHERE id = ?').get(teamId);
-    io.to(`team-${teamId}`).to('admins').emit('score:update', {
-      team_id: teamId,
-      total_points: updatedTeam.total_points,
-    });
-    io.to('admins').emit('redemption:new', { redemption_id: redemptionId, team_id: teamId });
-
-    res.json({ ok: true, total_points: updatedTeam.total_points });
+    const stickers = catalog.map(s => ({
+      ...s,
+      image_url: s.image_url || resolveStickerImage(s.key),
+      available_count: mine.filter(m => m.sticker_key === s.key && m.status === 'available').length,
+      history: mine.filter(m => m.sticker_key === s.key),
+    }));
+    res.json({ stickers });
   });
 
   // ---------------- FINAL ROUND ----------------

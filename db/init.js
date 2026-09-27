@@ -1,6 +1,7 @@
 // Khoi tao schema + du lieu mau cho Teambuilding FIT
 const bcrypt = require('bcryptjs');
 const db = require('./database');
+const { STICKER_DEFS } = require('../utils/stickers');
 
 function migrate() {
   db.exec(`
@@ -19,7 +20,17 @@ function migrate() {
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     display_name TEXT DEFAULT 'Quản trò',
-    assigned_game TEXT NOT NULL
+    assigned_game TEXT NOT NULL -- CU: 1 tro duy nhat. Da nghi huu tu khi co bang assignment
+                                -- ben duoi (1 quan tro co the phu trach NHIEU tro) - cot nay
+                                -- chi con duoc GHI (luu tro dau tien) de tuong thich nguoc,
+                                -- khong con duoc DOC de xac dinh quyen han nua.
+  );
+
+  -- 1 quan tro co the phu trach NHIEU tro (vd Chặng khac nhau nhung cung 1 nguoi chua).
+  CREATE TABLE IF NOT EXISTS game_master_assignments (
+    game_master_id INTEGER NOT NULL REFERENCES game_masters(id) ON DELETE CASCADE,
+    game_key TEXT NOT NULL,
+    PRIMARY KEY (game_master_id, game_key)
   );
 
   CREATE TABLE IF NOT EXISTS teams (
@@ -94,6 +105,8 @@ function migrate() {
     background_image TEXT DEFAULT '/img/map-placeholder.svg'
   );
 
+  -- Da nghi huu (khong con duoc seed/dung tu khi doi sang he thong "sticker" ben duoi theo
+  -- yeu cau moi) - giu nguyen bang de khong pha du lieu cu tren DB dang chay.
   CREATE TABLE IF NOT EXISTS gifts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -113,6 +126,32 @@ function migrate() {
     created_at TEXT DEFAULT (datetime('now')),
     handled_at TEXT,
     handled_by TEXT
+  );
+
+  -- Sticker "quyen nang" dung trong vong chung ket - xem utils/stickers.js cho dinh nghia
+  -- day du 4 sticker va cong thuc hieu ung. Danh muc co dinh (khong phai gift co the mua),
+  -- doi nhan duoc khi hoan thanh/thang tro tuong ung (xem utils/scoring.js).
+  CREATE TABLE IF NOT EXISTS stickers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    source_game TEXT,
+    image_url TEXT DEFAULT ''
+  );
+
+  -- 1 dong = 1 sticker cu the ma 1 doi dang giu (hoac da dung). status='used' + cac cot
+  -- used_* de luu lai lich su khi BTC ap dung hieu ung tren dashboard.
+  CREATE TABLE IF NOT EXISTS team_stickers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    sticker_key TEXT NOT NULL REFERENCES stickers(key),
+    status TEXT NOT NULL DEFAULT 'available', -- available | used
+    awarded_at TEXT DEFAULT (datetime('now')),
+    awarded_reason TEXT,
+    used_at TEXT,
+    used_by TEXT,
+    target_team_id INTEGER REFERENCES teams(id)
   );
 
   CREATE TABLE IF NOT EXISTS final_questions (
@@ -152,6 +191,12 @@ function migrate() {
   tryAddColumn('stages', 'location_name', `TEXT DEFAULT ''`);
   tryAddColumn('team_stage_status', 'round_no', 'INTEGER');
   tryAddColumn('team_stage_status', 'note', 'TEXT');
+  // Dung cho sticker "Ngoi sao hi vong": doi da giu truoc quyen tra loi cau hoi KE TIEP
+  // (chua duoc mo) - khi admin mo cau hoi tiep theo, pending_star_team_id se duoc "tieu thu"
+  // va chuyen thanh bonus_team_id + bonus_flat_points (7 diem co dinh, xem routes/admin.js).
+  tryAddColumn('final_state', 'pending_star_team_id', 'INTEGER');
+  tryAddColumn('final_state', 'bonus_team_id', 'INTEGER');
+  tryAddColumn('final_state', 'bonus_flat_points', 'INTEGER');
 }
 
 function tryAddColumn(table, column, definition) {
@@ -205,16 +250,12 @@ function seed() {
     for (const s of demoStages) insertStage.run(...s);
   }
 
-  const giftCount = db.prepare('SELECT COUNT(*) c FROM gifts').get().c;
-  if (giftCount === 0) {
-    const insertGift = db.prepare(`INSERT INTO gifts (name, description, cost_points, stock, image_url) VALUES (?, ?, ?, ?, ?)`);
-    const demoGifts = [
-      ['Bình giữ nhiệt', 'Bình giữ nhiệt in logo sự kiện', 50, 10, ''],
-      ['Túi tote sự kiện', 'Túi vải canvas kỷ niệm', 30, 15, ''],
-      ['Voucher cafe', 'Voucher 50k tại quầy cafe sự kiện', 20, 20, ''],
-      ['Loa bluetooth mini', 'Quà đặc biệt dành cho đội xuất sắc', 150, 3, ''],
-    ];
-    for (const g of demoGifts) insertGift.run(...g);
+  // Da bo seed "gifts" mau (doi qua tra diem) - thay bang danh muc sticker co dinh ben duoi.
+  // Dung INSERT OR IGNORE (khong gated boi count===0) de tu dong bo sung sticker con thieu
+  // ke ca tren DB da tung khoi tao truoc khi co tinh nang nay.
+  const insertSticker = db.prepare(`INSERT OR IGNORE INTO stickers (key, name, description, source_game) VALUES (?, ?, ?, ?)`);
+  for (const [game, def] of Object.entries(STICKER_DEFS)) {
+    insertSticker.run(def.key, def.name, def.description, game);
   }
 
   // Khong tao san cau hoi mau cho vong "Ai thông minh hơn sinh viên năm nhất" nua -
@@ -235,9 +276,12 @@ function reseedIfRequested() {
       DELETE FROM map_elements;
       DELETE FROM stages;
       DELETE FROM gifts;
+      DELETE FROM team_stickers;
+      DELETE FROM stickers;
       DELETE FROM score_history;
       DELETE FROM teams;
       DELETE FROM admins;
+      DELETE FROM game_master_assignments;
       DELETE FROM game_masters;
     `);
     db.prepare(`INSERT OR IGNORE INTO final_state (id, phase) VALUES (1, 'idle')`).run();

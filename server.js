@@ -85,12 +85,19 @@ function getFinalStatePayload() {
   const winnerTeam = state.buzzer_winner_team_id
     ? db.prepare('SELECT id, name, color FROM teams WHERE id = ?').get(state.buzzer_winner_team_id)
     : null;
+  // bonusPoints: doi thang buzz hien tai dang choi voi sticker "Ngoi sao hi vong" (xem
+  // routes/admin.js -> /final/open, /final/judge) - final.html dung de hien "🌟 +7 điểm". Cong
+  // khai duoc vi luc nay doi da lo la nguoi thang buzz roi (khong tiet lo som ai giu sticker -
+  // KHONG dua pending_star_team_id vao payload chung nay vi doi khac co the thay khi ket noi lai).
+  const bonusPoints = state.bonus_team_id && state.buzzer_winner_team_id === state.bonus_team_id
+    ? state.bonus_flat_points : null;
   return {
     phase: state.phase,
     question,
     winnerTeam,
     buzz_open_at: state.buzz_open_at,
     buzz_locked_at: state.buzz_locked_at,
+    bonusPoints,
   };
 }
 

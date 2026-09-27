@@ -24,7 +24,7 @@
   <div class="tabs" style="max-width:480px;">
     <button class="tab-btn active" data-tab="map">🗺️ Bản đồ</button>
     <button class="tab-btn" data-tab="score">📊 Điểm số</button>
-    <button class="tab-btn" data-tab="gift">🎁 Đổi quà</button>
+    <button class="tab-btn" data-tab="gift">🎟️ Kho sticker</button>
   </div>
 
   <div id="tab-map" class="tab-panel">
@@ -66,19 +66,10 @@
 
   <div id="tab-gift" class="tab-panel" style="display:none;">
     <div class="flex-between">
-      <div class="section-title" style="margin:0;">Đổi điểm lấy quà</div>
-      <div class="small-note">Điểm hiện có: <b id="giftPoints">0</b></div>
+      <div class="section-title" style="margin:0;">Kho sticker</div>
     </div>
+    <p class="small-note">Đội tự động nhận sticker khi hoàn thành/thắng trò tương ứng. Ban tổ chức sẽ áp dụng hiệu ứng sticker giúp bạn ở vòng chung kết (Ai thông minh hơn sinh viên năm nhất).</p>
     <div class="grid cols-3" id="giftGrid"></div>
-
-    <div class="section-title">Lịch sử đổi quà</div>
-    <div class="card">
-      <table>
-        <thead><tr><th>Thời gian</th><th>Quà</th><th style="text-align:right;">Điểm</th><th>Trạng thái</th></tr></thead>
-        <tbody id="redemptionBody"></tbody>
-      </table>
-      <div class="empty-hint" id="redemptionEmpty" style="display:none;">Chưa đổi quà nào.</div>
-    </div>
   </div>
 </div>
 
@@ -166,7 +157,6 @@ async function loadScore() {
   const data = await api('GET', '/api/team/score');
   document.getElementById('bigPoints').textContent = data.team.total_points;
   document.getElementById('pointsVal').textContent = data.team.total_points;
-  document.getElementById('giftPoints').textContent = data.team.total_points;
 
   const maxPts = Math.max(1, ...data.leaderboard.map(t => t.total_points));
   document.getElementById('leaderboardBox').innerHTML = data.leaderboard.map(t => `
@@ -189,45 +179,24 @@ async function loadScore() {
   document.getElementById('historyEmpty').style.display = data.history.length ? 'none' : 'block';
 }
 
-// ---- Gifts ----
+// ---- Stickers (thay the "Doi qua" cu) ----
+// Doi chi XEM kho sticker cua minh (dang giu + da dung) - viec ap dung hieu ung sticker do BTC
+// thuc hien tren dashboard, doi khong tu dung duoc o day.
 async function loadGifts() {
-  const data = await api('GET', '/api/team/gifts');
-  document.getElementById('giftPoints').textContent = data.total_points;
+  const data = await api('GET', '/api/team/stickers');
 
-  document.getElementById('giftGrid').innerHTML = data.gifts.map(g => `
+  document.getElementById('giftGrid').innerHTML = data.stickers.map(s => `
     <div class="card gift-card">
-      <div class="gift-img">${g.image_url ? `<img src="${escapeHtml(g.image_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">` : '🎁'}</div>
-      <h4>${escapeHtml(g.name)}</h4>
-      <div class="small-note">${escapeHtml(g.description || '')}</div>
+      <div class="gift-img">${s.image_url ? `<img src="${escapeHtml(s.image_url)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">` : '🎟️'}</div>
+      <h4>${escapeHtml(s.name)}</h4>
+      <div class="small-note">${escapeHtml(s.description || '')}</div>
       <div class="flex-between">
-        <span class="cost">${g.cost_points} điểm</span>
-        <span class="small-note">Còn ${g.stock}</span>
+        <span class="cost">${s.available_count > 0 ? `Đang có: ${s.available_count}` : 'Chưa có / đã dùng hết'}</span>
       </div>
-      <button class="btn block sm" ${g.stock <= 0 || data.total_points < g.cost_points ? 'disabled' : ''} onclick="redeem(${g.id}, '${escapeHtml(g.name).replace(/'/g, "")}', ${g.cost_points})">
-        ${g.stock <= 0 ? 'Đã hết' : (data.total_points < g.cost_points ? 'Chưa đủ điểm' : 'Đổi ngay')}
-      </button>
+      ${s.history.filter(h => h.status === 'used').length
+        ? `<div class="small-note">Đã dùng ${s.history.filter(h => h.status === 'used').length} lần</div>` : ''}
     </div>
-  `).join('') || '<div class="empty-hint">Chưa có quà nào.</div>';
-
-  const body = document.getElementById('redemptionBody');
-  body.innerHTML = data.myRedemptions.map(r => `
-    <tr>
-      <td>${fmtDateTime(r.created_at)}</td>
-      <td>${escapeHtml(r.gift_name)}</td>
-      <td style="text-align:right;">-${r.points_spent}</td>
-      <td><span class="badge ${r.status}">${({pending:'Chờ duyệt', approved:'Đã duyệt', rejected:'Từ chối', delivered:'Đã nhận'})[r.status]}</span></td>
-    </tr>
-  `).join('');
-  document.getElementById('redemptionEmpty').style.display = data.myRedemptions.length ? 'none' : 'block';
-}
-
-async function redeem(giftId, giftName, cost) {
-  if (!confirm(`Đổi ${cost} điểm lấy "${giftName}"?`)) return;
-  try {
-    await api('POST', `/api/team/gifts/${giftId}/redeem`);
-    toast('Đổi quà thành công! Chờ ban tổ chức xác nhận.');
-    loadGifts();
-  } catch (e) { toast(e.message, 'error'); }
+  `).join('') || '<div class="empty-hint">Chưa có sticker nào.</div>';
 }
 
 // ---- Final round banner ----
@@ -246,7 +215,7 @@ socket.on('score:update', (payload) => {
     loadGifts();
   }
 });
-socket.on('redemption:update', () => loadGifts());
+socket.on('stickers:update', () => loadGifts());
 socket.on('map:update', () => loadMap());
 socket.on('final:state', (state) => {
   document.getElementById('finalBanner').style.display = state.phase !== 'idle' ? 'block' : 'none';
