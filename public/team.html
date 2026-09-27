@@ -68,7 +68,7 @@
     <div class="flex-between">
       <div class="section-title" style="margin:0;">Kho sticker</div>
     </div>
-    <p class="small-note">Đội tự động nhận sticker khi hoàn thành/thắng trò tương ứng. Ban tổ chức sẽ áp dụng hiệu ứng sticker giúp bạn ở vòng chung kết (Ai thông minh hơn sinh viên năm nhất).</p>
+    <p class="small-note">Ban tổ chức sẽ trao sticker cho đội sau mỗi trò chơi. Khi vào vòng chung kết (Ai thông minh hơn sinh viên năm nhất), bạn tự dùng sticker của mình ngay tại trang thi đấu.</p>
     <div class="grid cols-3" id="giftGrid"></div>
   </div>
 </div>
@@ -180,8 +180,8 @@ async function loadScore() {
 }
 
 // ---- Stickers (thay the "Doi qua" cu) ----
-// Doi chi XEM kho sticker cua minh (dang giu + da dung) - viec ap dung hieu ung sticker do BTC
-// thuc hien tren dashboard, doi khong tu dung duoc o day.
+// Trang nay chi XEM kho sticker cua doi (BTC trao sau moi tro choi) - viec DUNG sticker
+// thuc hien o final.html khi doi vao vong chung ket, khong dung duoc ngay tai day.
 async function loadGifts() {
   const data = await api('GET', '/api/team/stickers');
 

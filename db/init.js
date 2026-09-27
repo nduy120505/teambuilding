@@ -129,8 +129,9 @@ function migrate() {
   );
 
   -- Sticker "quyen nang" dung trong vong chung ket - xem utils/stickers.js cho dinh nghia
-  -- day du 4 sticker va cong thuc hieu ung. Danh muc co dinh (khong phai gift co the mua),
-  -- doi nhan duoc khi hoan thanh/thang tro tuong ung (xem utils/scoring.js).
+  -- day du 4 sticker va cong thuc hieu ung. Danh muc co dinh (khong phai gift co the mua).
+  -- BTC TRAO sticker cho doi thu cong sau moi tro choi (routes/admin.js -> POST /stickers/grant),
+  -- KHONG con tu dong theo ket qua cham diem.
   CREATE TABLE IF NOT EXISTS stickers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key TEXT UNIQUE NOT NULL,
@@ -141,7 +142,8 @@ function migrate() {
   );
 
   -- 1 dong = 1 sticker cu the ma 1 doi dang giu (hoac da dung). status='used' + cac cot
-  -- used_* de luu lai lich su khi BTC ap dung hieu ung tren dashboard.
+  -- used_* de luu lai lich su khi DOI tu dung hieu ung (routes/team.js -> POST /stickers/use) -
+  -- BTC khong con ap dung ho, chi trao sticker (awarded_by) roi doi tu quyet dinh khi nao dung.
   CREATE TABLE IF NOT EXISTS team_stickers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -149,6 +151,7 @@ function migrate() {
     status TEXT NOT NULL DEFAULT 'available', -- available | used
     awarded_at TEXT DEFAULT (datetime('now')),
     awarded_reason TEXT,
+    awarded_by TEXT,
     used_at TEXT,
     used_by TEXT,
     target_team_id INTEGER REFERENCES teams(id)
@@ -197,6 +200,7 @@ function migrate() {
   tryAddColumn('final_state', 'pending_star_team_id', 'INTEGER');
   tryAddColumn('final_state', 'bonus_team_id', 'INTEGER');
   tryAddColumn('final_state', 'bonus_flat_points', 'INTEGER');
+  tryAddColumn('team_stickers', 'awarded_by', 'TEXT');
 }
 
 function tryAddColumn(table, column, definition) {

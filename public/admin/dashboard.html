@@ -102,7 +102,7 @@
 
   <!-- ===================== STICKERS ===================== -->
   <div id="tab-stickers" class="tab-panel" style="display:none;">
-    <p class="small-note">Đội tự động nhận sticker khi hoàn thành/thắng trò tương ứng (Chặng 1-4). BTC dùng khu vực bên dưới để áp dụng hiệu ứng sticker cho đội trong vòng chung kết.</p>
+    <p class="small-note">Sau khi 1 trò kết thúc, BTC trao sticker tương ứng cho đội xứng đáng ở khu vực bên dưới. Khi vào vòng chung kết, CHÍNH ĐỘI sẽ tự dùng sticker của mình (ở trang thi đấu) — BTC không cần áp dụng hộ nữa.</p>
 
     <div class="section-title" style="margin-top:0;">Danh mục sticker</div>
     <div class="card">
@@ -112,29 +112,27 @@
       </table>
     </div>
 
-    <div class="section-title">Áp dụng sticker cho đội</div>
+    <div class="section-title">Trao sticker cho đội</div>
     <div class="card">
       <div class="grid cols-2">
         <div>
-          <label>Đội dùng sticker</label>
-          <select id="applyStickerTeam" onchange="renderApplyStickerOptions()"></select>
+          <label>Đội nhận sticker</label>
+          <select id="grantStickerTeam"></select>
         </div>
         <div>
-          <label>Sticker (chỉ hiện sticker đội đang có sẵn)</label>
-          <select id="applyStickerKey" onchange="renderApplyStickerOptions()"></select>
+          <label>Sticker</label>
+          <select id="grantStickerKey"></select>
         </div>
       </div>
-      <div id="applyStickerTargetWrap" style="margin-top:10px; display:none;">
-        <label id="applyStickerTargetLabel">Đội bị nhắm</label>
-        <select id="applyStickerTarget"></select>
-      </div>
-      <button class="btn block" style="margin-top:14px;" onclick="applySticker()">✅ Áp dụng sticker</button>
+      <label>Ghi chú (tuỳ chọn)</label>
+      <input id="grantStickerNote" placeholder="VD: Về nhất Trò khởi động">
+      <button class="btn block" style="margin-top:4px;" onclick="grantSticker()">🎁 Trao sticker</button>
     </div>
 
     <div class="section-title">Kho sticker của các đội</div>
     <div class="card">
       <table>
-        <thead><tr><th>Đội</th><th>Sticker</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
+        <thead><tr><th>Đội</th><th>Sticker</th><th>Trạng thái</th><th>Ghi chú</th><th>Thao tác</th></tr></thead>
         <tbody id="stickerInventoryBody"></tbody>
       </table>
     </div>
@@ -260,6 +258,7 @@ async function loadTeams() {
   `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có đội nào.</td></tr>';
 
   populateScheduleTeamSelect();
+  populateGrantStickerSelects();
   renderScoringForm();
 }
 
@@ -674,16 +673,11 @@ async function deleteScheduleEntry(stageId) {
 
 /* ===================== STICKERS ===================== */
 // 4 sticker co dinh (khong them/bot duoc, chi sua ten/mo ta/anh) - doi nhan tu dong khi hoan
-// thanh/thang tro tuong ung (xem utils/scoring.js). BTC ap dung hieu ung o day khi doi muon dung.
+// thanh/thang tro tuong ung. BTC TRAO sticker cho doi thu cong sau moi tro choi (khong con tu
+// dong theo diem); DOI tu dung sticker cua minh khi vao vong chung ket (xem final.html), BTC
+// khong con ap dung hieu ung ho nua.
 let STICKERS_CATALOG = [];
 let STICKER_INVENTORY = [];
-
-const STICKER_TARGET_INFO = {
-  ke_cuop: { needsTarget: true, label: 'Đội bị lấy điểm' },
-  nhan_doi: { needsTarget: false },
-  dong_bang: { needsTarget: true, label: 'Đội bị khoá quyền trả lời' },
-  ngoi_sao_hi_vong: { needsTarget: false },
-};
 
 async function loadStickers() {
   const { stickers } = await api('GET', '/api/admin/stickers');
@@ -696,7 +690,7 @@ async function loadStickers() {
       <td class="row-actions"><button class="btn secondary sm" onclick="openEditStickerModal('${s.key}')">Sửa</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có sticker nào.</td></tr>';
-  populateApplyStickerTeamSelect();
+  populateGrantStickerSelects();
 }
 
 function openEditStickerModal(key) {
@@ -736,57 +730,44 @@ async function loadStickerInventory() {
       <td>${escapeHtml(row.sticker_name)}</td>
       <td><span class="badge ${row.status === 'available' ? 'completed' : 'locked'}">${row.status === 'available' ? 'Còn dùng' : 'Đã dùng'}</span></td>
       <td>${row.status === 'used'
-        ? `Dùng lúc ${fmtDateTime(row.used_at)}${row.target_team_name ? ' → ' + escapeHtml(row.target_team_name) : ''}`
+        ? `Đội tự dùng lúc ${fmtDateTime(row.used_at)}${row.target_team_name ? ' → ' + escapeHtml(row.target_team_name) : ''}`
         : escapeHtml(row.awarded_reason || '-')}</td>
+      <td class="row-actions">
+        ${row.status === 'available' ? `<button class="btn danger sm" onclick="revokeSticker(${row.id})">Thu hồi</button>` : ''}
+      </td>
     </tr>
-  `).join('') || '<tr><td colspan="4" class="empty-hint">Chưa có sticker nào được trao.</td></tr>';
-  populateApplyStickerTeamSelect();
+  `).join('') || '<tr><td colspan="5" class="empty-hint">Chưa có sticker nào được trao.</td></tr>';
 }
 
-function populateApplyStickerTeamSelect() {
-  const sel = document.getElementById('applyStickerTeam');
-  if (!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-  if (prev) sel.value = prev;
-  renderApplyStickerOptions();
-}
-
-function renderApplyStickerOptions() {
-  const teamId = Number(document.getElementById('applyStickerTeam').value);
-  const available = STICKER_INVENTORY.filter(r => r.team_id === teamId && r.status === 'available');
-  const keySel = document.getElementById('applyStickerKey');
-  const prevKey = keySel.value;
-  const uniqueKeys = [...new Map(available.map(r => [r.sticker_key, r])).values()];
-  keySel.innerHTML = uniqueKeys.length
-    ? uniqueKeys.map(r => `<option value="${r.sticker_key}">${escapeHtml(r.sticker_name)}</option>`).join('')
-    : '<option value="">(Đội chưa có sticker khả dụng)</option>';
-  if (prevKey && uniqueKeys.some(r => r.sticker_key === prevKey)) keySel.value = prevKey;
-
-  const key = keySel.value;
-  const info = STICKER_TARGET_INFO[key];
-  const wrap = document.getElementById('applyStickerTargetWrap');
-  if (info && info.needsTarget) {
-    wrap.style.display = 'block';
-    document.getElementById('applyStickerTargetLabel').textContent = info.label;
-    document.getElementById('applyStickerTarget').innerHTML = TEAMS.filter(t => t.id !== teamId)
-      .map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
-  } else {
-    wrap.style.display = 'none';
-  }
-}
-
-async function applySticker() {
-  const team_id = Number(document.getElementById('applyStickerTeam').value);
-  const sticker_key = document.getElementById('applyStickerKey').value;
-  if (!team_id || !sticker_key) return toast('Chọn đội và sticker hợp lệ', 'error');
-  const info = STICKER_TARGET_INFO[sticker_key];
-  const target_team_id = info && info.needsTarget ? Number(document.getElementById('applyStickerTarget').value) : undefined;
-  if (info && info.needsTarget && !target_team_id) return toast('Chọn đội bị nhắm', 'error');
+async function revokeSticker(id) {
+  if (!confirm('Thu hồi sticker trao nhầm này?')) return;
   try {
-    const { message } = await api('POST', '/api/admin/stickers/apply', { team_id, sticker_key, target_team_id });
-    toast(message || 'Đã áp dụng sticker');
-    loadStickerInventory(); loadTeams();
+    await api('DELETE', `/api/admin/stickers/inventory/${id}`);
+    toast('Đã thu hồi'); loadStickerInventory();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function populateGrantStickerSelects() {
+  const teamSel = document.getElementById('grantStickerTeam');
+  const keySel = document.getElementById('grantStickerKey');
+  if (!teamSel || !keySel) return;
+  const prevTeam = teamSel.value, prevKey = keySel.value;
+  teamSel.innerHTML = TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  keySel.innerHTML = STICKERS_CATALOG.map(s => `<option value="${s.key}">${escapeHtml(s.name)}</option>`).join('');
+  if (prevTeam) teamSel.value = prevTeam;
+  if (prevKey) keySel.value = prevKey;
+}
+
+async function grantSticker() {
+  const team_id = Number(document.getElementById('grantStickerTeam').value);
+  const sticker_key = document.getElementById('grantStickerKey').value;
+  const note = document.getElementById('grantStickerNote').value.trim();
+  if (!team_id || !sticker_key) return toast('Chọn đội và sticker hợp lệ', 'error');
+  try {
+    const { message } = await api('POST', '/api/admin/stickers/grant', { team_id, sticker_key, note });
+    toast(message || 'Đã trao sticker');
+    document.getElementById('grantStickerNote').value = '';
+    loadStickerInventory();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -913,10 +894,15 @@ async function loadGameMasters() {
 function openGameMasterModal(id) {
   const gm = id ? GAME_MASTERS.find(x => x.id === id) : null;
   const assigned = gm ? (gm.assigned_games || []) : [];
+  // Luu y: CSS chung "input, select, textarea { width:100%; margin-bottom:16px; }" trong
+  // style.css se ap ca vao checkbox neu khong ghi de rieng -> checkbox bi keo gian full-width
+  // day chu nhan dat sang phai. Phai ghi de width/margin/flex-shrink ngay tren the input.
   const checkboxes = SCORING_GAMES_LIST.map(g => `
-    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; margin:4px 0;">
-      <input type="checkbox" value="${g.key}" class="gmGameCheckbox" ${assigned.includes(g.key) ? 'checked' : ''}>
-      ${escapeHtml(g.label)}
+    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; margin:0 0 10px 0;">
+      <input type="checkbox" value="${g.key}" class="gmGameCheckbox"
+        style="width:18px; height:18px; flex-shrink:0; margin:0; padding:0;"
+        ${assigned.includes(g.key) ? 'checked' : ''}>
+      <span>${escapeHtml(g.label)}</span>
     </label>
   `).join('');
   showModal(`

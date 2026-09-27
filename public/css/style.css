@@ -141,7 +141,7 @@ tr:last-child td { border-bottom: none; }
 }
 
 .gift-card { display: flex; flex-direction: column; gap: 10px; }
-.gift-card .gift-img { width: 100%; height: 120px; border-radius: 10px; background: var(--bg-soft); display: flex; align-items: center; justify-content: center; font-size: 2rem; }
+.gift-card .gift-img { width: 100%; height: 200px; border-radius: 10px; background: var(--bg-soft); display: flex; align-items: center; justify-content: center; font-size: 4rem; }
 .gift-card h4 { margin: 0; }
 .gift-card .cost { font-weight: 700; color: var(--warning); }
 

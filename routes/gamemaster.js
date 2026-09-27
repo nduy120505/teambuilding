@@ -38,7 +38,7 @@ module.exports = function (io) {
     const { results, rule, error } = computeGameScoring(game, entries);
     if (error) return res.status(400).json({ error });
 
-    applyGameScoring(db, io, results, rule, `Quản trò: ${req.session.gameMasterUsername}`, game);
+    applyGameScoring(db, io, results, rule, `Quản trò: ${req.session.gameMasterUsername}`);
     res.json({ ok: true, results });
   });
 

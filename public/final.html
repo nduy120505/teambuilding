@@ -47,6 +47,28 @@
     align-items:center; justify-content:center; flex-direction:column; gap: 16px; text-align:center; padding:20px;
   }
   #violationCount { font-size: .85rem; color: var(--text-dim); }
+
+  /* Thanh sticker cua doi - doi tu dung sticker minh dang co ngay tai day khi vao chung ket */
+  #stickerBar {
+    padding: 10px 20px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center;
+  }
+  body.has-bg-image #stickerBar { backdrop-filter: blur(2px); background: rgba(28, 36, 54, .82); }
+  .sticker-chip {
+    display: flex; align-items: center; gap: 12px; padding: 10px 20px 10px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: var(--bg-soft); cursor: pointer; font-size: 1.05rem;
+  }
+  .sticker-chip:hover { border-color: var(--primary); }
+  .sticker-chip .sticker-icon { width: 48px; height: 48px; object-fit: cover; border-radius: 10px; flex-shrink: 0; }
+  .sticker-chip .sticker-icon-emoji { width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; flex-shrink: 0; }
+  .sticker-chip .count { background: var(--primary); color: #fff; border-radius: 999px; font-size: .8rem; padding: 2px 9px; }
+  #stickerModalBackdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 70; display: none;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  #stickerModalBox { background: var(--bg); border: 1px solid var(--border); border-radius: 14px; padding: 24px; max-width: 420px; width: 100%; }
+  .sticker-modal-icon { width: 96px; height: 96px; object-fit: cover; border-radius: 16px; display: block; margin: 0 auto 14px; }
+  .sticker-modal-icon-emoji { width: 96px; height: 96px; display: flex; align-items: center; justify-content: center; font-size: 3.5rem; margin: 0 auto 14px; background: var(--bg-soft); border-radius: 16px; }
 </style>
 </head>
 <body>
@@ -86,6 +108,12 @@
   <div id="winnerBanner" style="display:none;"></div>
 
   <button class="buzzer-btn" id="buzzerBtn" disabled><span class="bell-icon">🔔</span></button>
+</div>
+
+<div id="stickerBar"></div>
+
+<div id="stickerModalBackdrop">
+  <div id="stickerModalBox"></div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
@@ -222,6 +250,83 @@ socket.on('score:update', (payload) => {
   const sign = payload.delta > 0 ? '+' : '';
   toast(`Điểm của bạn vừa thay đổi: ${sign}${payload.delta} (còn ${payload.total_points} điểm)`, payload.delta >= 0 ? 'success' : 'error');
 });
+
+// ---- Sticker: doi tu dung sticker minh dang co (BTC chi trao, khong con ap dung ho) ----
+let OTHER_TEAMS = [];
+let MY_STICKERS_ALL = [];
+const STICKER_TARGET_INFO = {
+  ke_cuop: { needsTarget: true, label: 'Đội bị lấy điểm' },
+  nhan_doi: { needsTarget: false },
+  dong_bang: { needsTarget: true, label: 'Đội bị khoá quyền trả lời (chỉ dùng được khi chuông đang mở)' },
+  ngoi_sao_hi_vong: { needsTarget: false },
+};
+
+async function loadOtherTeams() {
+  try {
+    const { teams } = await api('GET', '/api/team/teams');
+    OTHER_TEAMS = teams;
+  } catch (e) { /* bo qua, chi anh huong sticker can chon doi muc tieu */ }
+}
+
+async function loadMyStickers() {
+  try {
+    const { stickers } = await api('GET', '/api/team/stickers');
+    MY_STICKERS_ALL = stickers;
+    renderStickerBar(stickers.filter(s => s.available_count > 0));
+  } catch (e) { /* chua dang nhap xong hoac loi tam thoi, bo qua */ }
+}
+
+function renderStickerBar(available) {
+  const bar = document.getElementById('stickerBar');
+  if (!available.length) { bar.innerHTML = ''; return; }
+  bar.innerHTML = available.map(s => `
+    <button class="sticker-chip" onclick="openUseStickerModal('${s.key}')">
+      ${s.image_url ? `<img class="sticker-icon" src="${escapeHtml(s.image_url)}">` : '<span class="sticker-icon-emoji">🎟️</span>'}
+      ${escapeHtml(s.name)} <span class="count">${s.available_count}</span>
+    </button>
+  `).join('');
+}
+
+function closeStickerModal() { document.getElementById('stickerModalBackdrop').style.display = 'none'; }
+document.getElementById('stickerModalBackdrop').addEventListener('click', (e) => {
+  if (e.target.id === 'stickerModalBackdrop') closeStickerModal();
+});
+
+function openUseStickerModal(key) {
+  const info = STICKER_TARGET_INFO[key] || {};
+  const sticker = MY_STICKERS_ALL.find(s => s.key === key) || {};
+  const targetOptions = OTHER_TEAMS.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+  document.getElementById('stickerModalBox').innerHTML = `
+    ${sticker.image_url ? `<img class="sticker-modal-icon" src="${escapeHtml(sticker.image_url)}">` : '<div class="sticker-modal-icon-emoji">🎟️</div>'}
+    <h3 style="margin-top:0; text-align:center;">Dùng sticker "${escapeHtml(sticker.name || '')}"?</h3>
+    ${info.needsTarget ? `
+      <label>${escapeHtml(info.label)}</label>
+      <select id="stickerTargetSelect">${targetOptions || '<option value="">(Không có đội khác)</option>'}</select>
+    ` : '<p class="small-note">Sticker này áp dụng ngay cho đội bạn, không cần chọn đội khác.</p>'}
+    <div class="row-actions" style="margin-top:14px;">
+      <button class="btn" onclick="confirmUseSticker('${key}')">✅ Dùng ngay</button>
+      <button class="btn secondary" onclick="closeStickerModal()">Huỷ</button>
+    </div>
+  `;
+  document.getElementById('stickerModalBackdrop').style.display = 'flex';
+}
+
+async function confirmUseSticker(key) {
+  const info = STICKER_TARGET_INFO[key] || {};
+  const target_team_id = info.needsTarget ? Number(document.getElementById('stickerTargetSelect').value) : undefined;
+  if (info.needsTarget && !target_team_id) return toast('Chọn đội mục tiêu', 'error');
+  try {
+    const { message } = await api('POST', '/api/team/stickers/use', { sticker_key: key, target_team_id });
+    closeStickerModal();
+    toast(message || 'Đã dùng sticker');
+    loadMyStickers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+socket.on('stickers:update', () => loadMyStickers());
+
+loadOtherTeams();
+loadMyStickers();
 </script>
 </body>
 </html>
